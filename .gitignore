@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+backend/.venv/
+backend/uv.lock.bak
+
+# Node
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo/
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Editors
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Docker
+infra/data/
+*.pid
+
+# Logs
+*.log

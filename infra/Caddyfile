@@ -1,0 +1,15 @@
+{
+	auto_https off
+}
+
+:80 {
+	# API: strip the /api prefix before forwarding so FastAPI sees clean paths
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else → Next.js
+	handle {
+		reverse_proxy web:3000
+	}
+}
