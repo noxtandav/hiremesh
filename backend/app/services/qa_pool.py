@@ -196,14 +196,16 @@ def _synthesize_structured(question: str, rows: list[dict]) -> str:
     )
 
 
-def _semantic_pick(
-    db: Session, question: str, *, base_filters: StructuredQuery | None
-) -> list[Candidate]:
-    """Use the M4 search service to pull top candidates by semantic match.
+SEMANTIC_LIMIT = 50  # ranked candidates returned to the UI; synthesis still uses top 10
+SYNTHESIS_TOP_K = 10
 
-    `base_filters` (when present) constrains the candidate set first so hybrid
-    queries respect both the hard filter and the fuzzy ranking.
-    """
+
+def _build_search_request(
+    question: str,
+    *,
+    base_filters: StructuredQuery | None,
+    limit: int = SEMANTIC_LIMIT,
+) -> SearchRequest:
     skills: list[str] = []
     location: str | None = None
     exp_min: float | None = None
@@ -218,24 +220,51 @@ def _semantic_pick(
                 exp_min = float(f.value)
             elif f.column == "total_exp_years" and f.op in {"lte", "lt"}:
                 exp_max = float(f.value)
-
-    req = SearchRequest(
+    return SearchRequest(
         q=question,
         location=location,
         skills=skills,
         exp_min=exp_min,
         exp_max=exp_max,
-        limit=10,
+        limit=limit,
     )
-    rows = search_service.search(db, req)
-    return [c for c, _score in rows]
 
 
-def _fake_synthesize_semantic(question: str, hits: list[Candidate]) -> str:
+def _semantic_pick(
+    db: Session,
+    question: str,
+    *,
+    base_filters: StructuredQuery | None,
+    limit: int = SEMANTIC_LIMIT,
+) -> tuple[list[tuple[Candidate, float | None]], int]:
+    """Returns (hits, pool_size). `hits` is (candidate, score) ordered
+    best-first. `pool_size` is the total number of candidates the semantic
+    ranker considered (i.e. those matching base_filters AND with embeddings),
+    used downstream to compute a true percentile rank."""
+    req = _build_search_request(
+        question, base_filters=base_filters, limit=limit
+    )
+    hits = search_service.search(db, req)
+    pool_size = search_service.count(db, req)
+    return hits, pool_size
+
+
+def _percentile(rank: int, pool_size: int) -> float:
+    """Match percentile, 0–100. 100 means best in the pool; the worst
+    candidate in a pool of N gets `1/N * 100` (never zero, so a single match
+    in a pool of one reads as 100%)."""
+    if pool_size <= 0:
+        return 100.0
+    return round((pool_size - rank + 1) / pool_size * 100, 1)
+
+
+def _fake_synthesize_semantic(
+    question: str, hits: list[tuple[Candidate, float | None]]
+) -> str:
     if not hits:
         return "No candidates match the description."
     lines = []
-    for c in hits[:10]:
+    for c, _score in hits[:SYNTHESIS_TOP_K]:
         bits = [
             x for x in (c.current_title, c.current_company, c.location) if x
         ]
@@ -243,7 +272,9 @@ def _fake_synthesize_semantic(question: str, hits: list[Candidate]) -> str:
     return "Top matches:\n" + "\n".join(lines)
 
 
-def _synthesize_semantic(question: str, hits: list[Candidate]) -> str:
+def _synthesize_semantic(
+    question: str, hits: list[tuple[Candidate, float | None]]
+) -> str:
     if llm.qa_is_fake():
         return _fake_synthesize_semantic(question, hits)
     profiles = [
@@ -256,7 +287,7 @@ def _synthesize_semantic(question: str, hits: list[Candidate]) -> str:
             "skills": c.skills,
             "summary": (c.summary or "")[:300],
         }
-        for c in hits[:10]
+        for c, _score in hits[:SYNTHESIS_TOP_K]
     ]
     return llm.qa_complete(
         system=(
@@ -285,13 +316,19 @@ def answer_pool(db: Session, question: str) -> dict:
         }
 
     if route == "semantic":
-        hits = _semantic_pick(db, question, base_filters=None)
+        hits, pool_size = _semantic_pick(db, question, base_filters=None)
         return {
             "route": route,
             "answer": _synthesize_semantic(question, hits),
             "citations": [
-                {"type": "row", "id": c.id, "snippet": c.full_name}
-                for c in hits
+                {
+                    "type": "row",
+                    "id": c.id,
+                    "snippet": c.full_name,
+                    "score": score,
+                    "percentile": _percentile(i + 1, pool_size),
+                }
+                for i, (c, score) in enumerate(hits)
             ],
             "rows": None,
             "matched_count": len(hits),
@@ -299,12 +336,19 @@ def answer_pool(db: Session, question: str) -> dict:
 
     # hybrid
     q = gen_query(question)
-    hits = _semantic_pick(db, question, base_filters=q)
+    hits, pool_size = _semantic_pick(db, question, base_filters=q)
     return {
         "route": route,
         "answer": _synthesize_semantic(question, hits),
         "citations": [
-            {"type": "row", "id": c.id, "snippet": c.full_name} for c in hits
+            {
+                "type": "row",
+                "id": c.id,
+                "snippet": c.full_name,
+                "score": score,
+                "percentile": _percentile(i + 1, pool_size),
+            }
+            for i, (c, score) in enumerate(hits)
         ],
         "rows": None,
         "matched_count": len(hits),

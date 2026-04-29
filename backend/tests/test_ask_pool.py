@@ -117,6 +117,23 @@ def test_semantic_route_returns_candidates(client):
     cited_ids = {c["id"] for c in body["citations"]}
     assert a in cited_ids
 
+    # Every semantic citation carries a numeric score, ordered best-first.
+    citations = body["citations"]
+    assert all(isinstance(c["score"], (int, float)) for c in citations)
+    scores = [c["score"] for c in citations]
+    assert scores == sorted(scores, reverse=True)
+    assert body["matched_count"] == len(citations)
+
+    # Percentile is a true rank within the pool of 3 candidates with embeddings:
+    # rank 1 → 100, rank 2 → 66.7, rank 3 → 33.3.
+    percentiles = [c["percentile"] for c in citations]
+    assert all(0 < p <= 100 for p in percentiles)
+    assert percentiles == sorted(percentiles, reverse=True)
+    assert percentiles[0] == 100.0
+    if len(percentiles) == 3:
+        assert percentiles[1] == 66.7
+        assert percentiles[2] == 33.3
+
 
 def test_pool_q_with_no_results(client):
     _login(client, **ADMIN)

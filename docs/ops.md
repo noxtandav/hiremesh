@@ -96,6 +96,37 @@ Notes on `--clean --if-exists`:
 - **Object storage** (resumes in MinIO/R2). The dump only contains DB rows; resume blobs live separately. For production, set bucket-level versioning + cross-region replication on R2 — that's the right tool. (We may add an `mc mirror` companion script later.)
 - **Redis state**. The Celery queue is ephemeral; nothing here needs backing up.
 
+## Admin user management
+
+There is no env-based bootstrap admin — fresh deployments start with an empty `users` table. Use the CLI shipped at `app/cli.py` against the running api container.
+
+| Operation | Command |
+|---|---|
+| Create the first admin (or any other admin) | `make admin-create EMAIL=you@example.com NAME="Your Name"` |
+| Reset a user's password (forgot password, lost MFA, etc.) | `make admin-set-password EMAIL=user@example.com` |
+| List all current admins (sanity check / audit) | `make admin-list` |
+
+All three prompt for the password interactively (echo off, min 12 chars). You can pass `--password ...` to skip the prompt — useful for CI/IaC, but the password lands in shell history, so prefer the prompt for ad-hoc work.
+
+Behind the scenes each `make` target shells out to `docker compose exec api python -m app.cli admin <subcommand>`, which uses the same SQLAlchemy session and password hashing the running app uses. If you need to run it outside Docker (e.g. against a remote DB from your laptop), set `DATABASE_URL` and run `python -m app.cli ...` directly inside the backend venv.
+
+`make admin-set-password` will also re-activate a deactivated user. To deactivate without resetting the password, use the in-app `/admin/users` page or `PATCH /api/users/{id}` directly.
+
+## LLM model configuration
+
+Three independent env vars cover the three LLM roles. Each defaults to `fake` (deterministic dev mode, no network calls). Set what you need in `infra/.env`:
+
+| Env var | Used for | Notes |
+|---|---|---|
+| `LLM_PARSE_MODEL` | Resume parsing — extracts structured fields (name, email, skills, etc.) from text. | Cheap chat model is fine; `gpt-4o-mini` class. |
+| `LLM_EMBED_MODEL` | Embeddings for the talent pool — drives semantic search and pool Ask. | Must be an embedding model (e.g. `text-embedding-3-small`, `voyage-3-large`). `LLM_EMBED_DIM` must match. |
+| `LLM_QA_MODEL` | All four Q&A roles: per-candidate Ask synthesis, pool classifier, structured-query SQL gen, pool synthesis. | Anything Claude-Haiku-class or `gpt-4o-mini` works; `gpt-4o` / Claude Sonnet give noticeably better SQL gen and routing if you start hitting issues. |
+| `LLM_API_KEY` | Optional override. If unset, LiteLLM picks the right provider env (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `COHERE_API_KEY`) by model prefix. | Use the per-provider envs when mixing providers across roles. |
+
+All four pass through `infra/docker-compose.yml`'s `&backend_env` block, so changing them requires `make up` (or `docker compose up -d`) to recreate containers — `restart` alone keeps the old environment.
+
+The `/admin/metrics` page surfaces the configured model ids so you can sanity-check what's actually live without exec'ing into the container.
+
 ## Deploying to a VPS
 
 Out of scope for this doc, but the high-level path is:

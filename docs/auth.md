@@ -18,19 +18,19 @@ The cookie is the **only** auth surface. There are no Authorization headers, no 
 
 Endpoints that require admin use `Depends(require_admin)`, which is a thin gate on top of `current_user`. A recruiter calling an admin-only endpoint gets a `403`, not a `401`.
 
-## First admin (bootstrap)
+## First admin (post-deploy CLI)
 
-Public signup is disabled. The very first admin is created **once**, at first boot, from environment variables:
+Public signup is disabled. The first admin in a fresh deployment is created via the CLI at `app/cli.py`:
 
 ```bash
-BOOTSTRAP_ADMIN_EMAIL=admin@example.com
-BOOTSTRAP_ADMIN_PASSWORD=change-me-on-first-login
-BOOTSTRAP_ADMIN_NAME=Admin
+make admin-create EMAIL=you@example.com NAME="Your Name"
+# Password: ******** (interactive prompt, echo off, min 12 chars)
+# Confirm:  ********
 ```
 
-The lifespan hook in `app/main.py` calls `bootstrap_admin_if_needed`, which is **idempotent**: it checks whether the `users` table is empty before doing anything. So leaving the env vars set across reboots is harmless — they're a no-op once any user exists.
+That target just shells `docker compose exec api python -m app.cli admin create ...`. The same CLI lets you reset a forgotten password (`make admin-set-password EMAIL=...`) or list current admins (`make admin-list`). See [`ops.md`](./ops.md#admin-user-management) for full ops details.
 
-The bootstrap admin is created with `must_change_password=true`, signaling that the first thing they should do on first login is change the password.
+There is **no env-based bootstrap admin** — `BOOTSTRAP_ADMIN_*` env vars no longer exist. Storing a password in plaintext in `.env`, only honoured on first-empty-table boot, was a prod hazard: the env file gets backed up, copied between hosts, sometimes committed by accident. Using the CLI keeps the password ephemeral (lives in your terminal session, then in argon2-hashed form in the DB).
 
 ## Adding more users
 
@@ -92,7 +92,9 @@ These are deferred deliberately — they each need their own design pass and are
 | Password hashing & JWT | `app/core/security.py` |
 | Auth dependency | `app/core/deps.py` |
 | Login/logout/me/change-password handlers | `app/api/auth.py` |
-| Admin user creation | `app/api/users.py` |
-| Bootstrap-admin logic | `app/services/users.py` |
+| Admin user creation (in-app) | `app/api/users.py` |
+| User-creation service helper | `app/services/users.py` |
+| Post-deploy admin CLI | `app/cli.py` |
 | Cookie/JWT settings | `app/core/config.py` |
 | Auth flow tests | `backend/tests/test_auth.py` |
+| CLI tests | `backend/tests/test_cli.py` |

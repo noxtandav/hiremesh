@@ -46,8 +46,8 @@ export default async function JobDetailPage({
 
   const range = (a: string | null, b: string | null, suffix = "") => {
     if (!a && !b) return null;
-    const sa = a ? Number(a).toLocaleString() : "?";
-    const sb = b ? Number(b).toLocaleString() : "?";
+    const sa = a ? Number(a).toLocaleString("en-US") : "?";
+    const sb = b ? Number(b).toLocaleString("en-US") : "?";
     return `${sa}–${sb}${suffix}`;
   };
 
@@ -79,7 +79,7 @@ export default async function JobDetailPage({
           {detail("Location", job.location)}
           {detail("Experience", range(job.exp_min, job.exp_max, " yrs"))}
           {detail("CTC", range(job.ctc_min, job.ctc_max))}
-          {detail("Created", new Date(job.created_at).toLocaleDateString())}
+          {detail("Created", job.created_at.slice(0, 10))}
         </div>
         {job.jd_text ? (
           <div className="mt-8">

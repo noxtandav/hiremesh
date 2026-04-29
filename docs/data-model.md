@@ -68,6 +68,7 @@ notes                                      └── position
 | `aa01c8e2f4d6` | m4 candidate_embeddings pgvector | enables `vector` extension; `candidate_embeddings` (with `ivfflat` index on Postgres, JSON column on SQLite) |
 | `bb02d6f3a8e1` | m5 v_candidate_search view | read-only `v_candidate_search` view (Postgres only) — the only surface the pool-Q&A SQL path can read |
 | `cc03e9a4b2f7` | m6 audit_log | `audit_log` table — operational write-side event log |
+| `dd04e5b9a3c2` | resume extracted text | `resumes.extracted_text` — raw extracted body, used as Q&A context |
 
 ## M2 additions
 
@@ -82,6 +83,7 @@ notes                                      └── position
 | `parse_status` | string | `pending` → `parsing` → `done` \| `failed` |
 | `parse_error` | string \| null | head of traceback if failed |
 | `parsed_json` | json \| null | the LLM's raw structured output, kept for debugging/replay |
+| `extracted_text` | text \| null | raw post-extraction body (PDF/DOCX → text), populated by the parse worker. Two consumers read it: per-candidate Ask (so questions can hit anything in the resume, not just lifted skills/summary) and the embedding builder (so semantic search can match against the full body, capped at `MAX_RESUME_CHARS=6000`). Fallback chain when null — re-extract from S3, then fall through to `parsed_json["summary"]`. |
 | `created_at` | timestamp | |
 
 ### `candidate_field_overrides`

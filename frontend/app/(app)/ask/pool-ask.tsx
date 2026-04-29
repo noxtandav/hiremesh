@@ -144,23 +144,48 @@ export function PoolAsk() {
 
           {result.citations.length ? (
             <div className="mt-5">
-              <CardEyebrow>Candidates</CardEyebrow>
+              <CardEyebrow>
+                Candidates · {result.citations.length}
+              </CardEyebrow>
               <ul className="mt-2 space-y-1.5">
-                {result.citations.map((c, i) => (
-                  <li key={i} className="text-sm">
-                    {c.id != null ? (
-                      <Link
-                        href={`/candidates/${c.id}`}
-                        className="hover:underline"
-                      >
-                        {c.snippet}
-                      </Link>
-                    ) : (
-                      <span>{c.snippet}</span>
-                    )}
-                  </li>
-                ))}
+                {result.citations.map((c, i) => {
+                  const pct =
+                    c.percentile != null ? Math.round(c.percentile) : null;
+                  const tooltip =
+                    c.score != null
+                      ? `Cosine similarity: ${c.score.toFixed(3)} · rank within filtered pool`
+                      : undefined;
+                  return (
+                    <li
+                      key={i}
+                      className="flex items-center gap-3 text-sm"
+                    >
+                      {pct != null ? (
+                        <span
+                          className="w-14 shrink-0 rounded-full bg-[var(--accent)] px-2 py-0.5 text-center font-mono text-[10px] uppercase tracking-[0.18em]"
+                          title={tooltip}
+                        >
+                          {pct}%
+                        </span>
+                      ) : null}
+                      {c.id != null ? (
+                        <Link
+                          href={`/candidates/${c.id}`}
+                          className="hover:underline"
+                        >
+                          {c.snippet}
+                        </Link>
+                      ) : (
+                        <span>{c.snippet}</span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
+              <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                Percentile = rank within the filtered pool · 100% is the best
+                match
+              </p>
             </div>
           ) : null}
         </Card>

@@ -66,6 +66,7 @@ export function Resumes({
     try {
       const r = await api.uploadResume(candidateId, file);
       setResumes((prev) => [r, ...prev]);
+      router.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Upload failed");
     } finally {
@@ -103,13 +104,12 @@ export function Resumes({
     }
   }
 
-  async function download(id: number) {
-    try {
-      const { url } = await api.getResumeUrl(id);
-      window.open(url, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed");
-    }
+  function download(id: number) {
+    window.open(
+      api.resumeFilePath(id, { download: true }),
+      "_blank",
+      "noopener,noreferrer",
+    );
   }
 
   return (
@@ -164,7 +164,10 @@ export function Resumes({
                   ) : null}
                   <StatusBadge status={r.parse_status} />
                 </div>
-                <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                <div
+                  className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]"
+                  suppressHydrationWarning
+                >
                   {new Date(r.created_at).toLocaleString()}
                 </div>
                 {r.parse_status === "failed" && r.parse_error ? (

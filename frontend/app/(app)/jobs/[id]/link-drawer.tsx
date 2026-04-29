@@ -116,7 +116,10 @@ export function LinkDrawer({
             <ol className="space-y-1.5">
               {transitions.map((t) => (
                 <li key={t.id} className="flex items-baseline gap-3 text-sm">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                  <span
+                    className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]"
+                    suppressHydrationWarning
+                  >
                     {new Date(t.at).toLocaleString()}
                   </span>
                   <span>
@@ -166,7 +169,10 @@ export function LinkDrawer({
                 className="rounded-md border border-[var(--border)] p-2.5 text-sm"
               >
                 <p className="whitespace-pre-wrap">{n.body}</p>
-                <div className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                <div
+                  className="mt-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]"
+                  suppressHydrationWarning
+                >
                   {new Date(n.created_at).toLocaleString()}
                 </div>
               </li>

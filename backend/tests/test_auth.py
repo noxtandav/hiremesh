@@ -10,22 +10,14 @@ def test_health(client):
     assert r.json() == {"status": "ok"}
 
 
-def test_bootstrap_creates_admin_on_first_boot(client):
-    # The lifespan event runs on TestClient context entry, so the admin should exist.
+def test_seeded_admin_can_log_in(client):
+    # The conftest fixture creates the admin (production uses app/cli.py
+    # post-deploy — there is no env-based bootstrap anymore).
     r = client.post("/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["email"] == ADMIN_EMAIL
     assert body["role"] == "admin"
-    assert body["must_change_password"] is True
-
-
-def test_bootstrap_is_idempotent(client, db_session):
-    from app.services.users import bootstrap_admin_if_needed
-
-    # Already bootstrapped via lifespan; a second call is a no-op.
-    result = bootstrap_admin_if_needed(db_session)
-    assert result is None
 
 
 def test_login_with_wrong_password_returns_401(client):

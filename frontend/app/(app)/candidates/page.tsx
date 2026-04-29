@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { PageHeader } from "@/components/page-header";
 import { api } from "@/lib/api";
+import { BulkImportButton } from "./bulk-import-button";
 import { CandidateSearch } from "./search-client";
 import { CreateCandidateButton } from "./create-candidate-button";
 
@@ -20,7 +21,12 @@ export default async function CandidatesPage() {
         eyebrow="Talent base"
         title="Candidates"
         description="Search the pool in plain English. Filters layer on top."
-        actions={<CreateCandidateButton />}
+        actions={
+          <div className="flex gap-2">
+            <BulkImportButton />
+            <CreateCandidateButton />
+          </div>
+        }
       />
       <CandidateSearch
         initial={initial}

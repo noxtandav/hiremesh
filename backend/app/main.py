@@ -17,13 +17,11 @@ from app.api.stages import router as stages_router
 from app.api.users import router as users_router
 from app.core import db as db_module
 from app.services.stages import seed_default_template_if_needed
-from app.services.users import bootstrap_admin_if_needed
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     with db_module.SessionLocal() as db:
-        bootstrap_admin_if_needed(db)
         seed_default_template_if_needed(db)
     yield
 

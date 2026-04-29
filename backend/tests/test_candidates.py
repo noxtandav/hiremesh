@@ -78,3 +78,63 @@ def test_cannot_patch_soft_deleted(client):
     client.delete(f"/candidates/{cid}")
     r = client.patch(f"/candidates/{cid}", json={"location": "Mumbai"})
     assert r.status_code == 404
+
+
+def test_duplicates_match_by_email_case_insensitive(client):
+    _login(client, **ADMIN)
+    a = client.post(
+        "/candidates", json={"full_name": "Asha A", "email": "asha@example.com"}
+    ).json()["id"]
+    b = client.post(
+        "/candidates", json={"full_name": "Asha B", "email": "ASHA@example.com"}
+    ).json()["id"]
+
+    dups_a = client.get(f"/candidates/{a}/duplicates").json()
+    assert [d["id"] for d in dups_a] == [b]
+    dups_b = client.get(f"/candidates/{b}/duplicates").json()
+    assert [d["id"] for d in dups_b] == [a]
+
+
+def test_duplicates_match_by_phone(client):
+    _login(client, **ADMIN)
+    a = client.post(
+        "/candidates", json={"full_name": "X", "phone": "+91-9999-99999"}
+    ).json()["id"]
+    b = client.post(
+        "/candidates", json={"full_name": "Y", "phone": "+91-9999-99999"}
+    ).json()["id"]
+    other = client.post(
+        "/candidates", json={"full_name": "Z", "phone": "+1-555-0000"}
+    ).json()["id"]
+
+    dups = {d["id"] for d in client.get(f"/candidates/{a}/duplicates").json()}
+    assert dups == {b}
+    assert other not in dups
+
+
+def test_duplicates_empty_when_no_email_or_phone(client):
+    _login(client, **ADMIN)
+    cid = client.post("/candidates", json={"full_name": "Nobody"}).json()["id"]
+    client.post("/candidates", json={"full_name": "Also Nobody"})
+    assert client.get(f"/candidates/{cid}/duplicates").json() == []
+
+
+def test_duplicates_excludes_self_and_soft_deleted(client):
+    _login(client, **ADMIN)
+    keep = client.post(
+        "/candidates", json={"full_name": "Keep", "email": "dup@example.com"}
+    ).json()["id"]
+    gone = client.post(
+        "/candidates", json={"full_name": "Gone", "email": "dup@example.com"}
+    ).json()["id"]
+    client.delete(f"/candidates/{gone}")
+
+    dups = client.get(f"/candidates/{keep}/duplicates").json()
+    assert dups == []  # self excluded, soft-deleted excluded
+
+
+def test_duplicates_404_for_unknown_candidate(client):
+    _login(client, **ADMIN)
+    r = client.get("/candidates/99999/duplicates")
+    assert r.status_code == 404
+

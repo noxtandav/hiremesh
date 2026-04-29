@@ -17,6 +17,7 @@ from app.core import llm
 from app.models.candidate import Candidate
 from app.models.note import Note
 from app.models.resume import Resume
+from app.services.resume_text import get_resume_text
 
 
 @dataclass
@@ -62,7 +63,7 @@ def _gather_context(
         Citation(type="profile", id=None, snippet=profile_text[:200])
     )
 
-    # Primary resume's parsed text
+    # Primary resume's full text
     primary = db.scalar(
         select(Resume)
         .where(
@@ -71,8 +72,8 @@ def _gather_context(
         )
         .limit(1)
     )
-    if primary is not None and primary.parsed_json:
-        body = primary.parsed_json.get("summary") or ""
+    if primary is not None:
+        body = get_resume_text(primary)
         if body:
             blocks.append(f"[RESUME #{primary.id}]\n{body}")
             citations.append(

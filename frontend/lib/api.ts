@@ -231,6 +231,8 @@ export const api = {
     request<void>(`/candidates/${id}`, { method: "DELETE" }),
   restoreCandidate: (id: number) =>
     request<Candidate>(`/candidates/${id}/restore`, { method: "POST" }),
+  listCandidateDuplicates: (id: number, cookie?: string) =>
+    request<Candidate[]>(`/candidates/${id}/duplicates`, { cookie }),
 
   // notes
   listNotes: (candidateId: number, cookie?: string) =>
@@ -252,7 +254,13 @@ export const api = {
   askCandidate: (candidateId: number, question: string) =>
     request<{
       answer: string;
-      citations: { type: string; id: number | null; snippet: string }[];
+      citations: {
+        type: string;
+        id: number | null;
+        snippet: string;
+        score: number | null;
+        percentile: number | null;
+      }[];
     }>(`/ask/candidate/${candidateId}`, {
       method: "POST",
       body: JSON.stringify({ question }),
@@ -260,7 +268,13 @@ export const api = {
   askPool: (question: string) =>
     request<{
       answer: string;
-      citations: { type: string; id: number | null; snippet: string }[];
+      citations: {
+        type: string;
+        id: number | null;
+        snippet: string;
+        score: number | null;
+        percentile: number | null;
+      }[];
       route: "structured" | "semantic" | "hybrid";
       matched_count: number | null;
       rows: Record<string, unknown>[] | null;
@@ -382,6 +396,42 @@ export const api = {
   // resumes
   listResumes: (candidateId: number, cookie?: string) =>
     request<Resume[]>(`/candidates/${candidateId}/resumes`, { cookie }),
+  bulkImportCandidates: async (files: File[]) => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f);
+    const res = await fetch(`${API_BASE}/candidates/bulk-import`, {
+      method: "POST",
+      body: fd,
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let detail: unknown;
+      try {
+        detail = JSON.parse(text)?.detail;
+      } catch {
+        detail = text;
+      }
+      throw new ApiError(
+        res.status,
+        detail,
+        typeof detail === "string" ? detail : `Bulk import failed (${res.status})`,
+      );
+    }
+    return (await res.json()) as {
+      imported: number;
+      total: number;
+      results: {
+        filename: string;
+        status: "ok" | "error";
+        candidate_id?: number;
+        resume_id?: number;
+        placeholder_name?: string;
+        error?: string;
+      }[];
+    };
+  },
   uploadResume: async (candidateId: number, file: File) => {
     const fd = new FormData();
     fd.append("file", file);
@@ -415,6 +465,14 @@ export const api = {
     request<void>(`/resumes/${id}`, { method: "DELETE" }),
   getResumeUrl: (id: number) =>
     request<{ url: string; expires_in: number }>(`/resumes/${id}/url`),
+  /**
+   * Same-origin path that streams resume bytes through the API. Use for
+   * iframe `src` and download links so it works regardless of where the
+   * user's browser is (LAN, WAN, etc.) — no dependency on S3_PUBLIC_ENDPOINT
+   * being reachable from the client.
+   */
+  resumeFilePath: (id: number, opts: { download?: boolean } = {}) =>
+    `${PUBLIC_API_BASE}/resumes/${id}/file${opts.download ? "?download=true" : ""}`,
 
   // stages
   getStageTemplate: (cookie?: string) =>

@@ -88,6 +88,7 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 | `PATCH`  | `/candidates/{id}` | cookie | `404` if soft-deleted |
 | `DELETE` | `/candidates/{id}` | cookie | Soft delete (sets `deleted_at`) |
 | `POST`   | `/candidates/{id}/restore` | cookie | Brings back a soft-deleted candidate |
+| `GET`    | `/candidates/{id}/duplicates` | cookie | Other active candidates with the same email (case-insensitive) or phone. Empty when both fields are null. Powers the "possible duplicate" banner on the candidate page. |
 
 ### Notes
 
@@ -105,13 +106,15 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | `POST`   | `/candidates/{id}/resumes` | cookie | multipart `file` (PDF/DOCX, ≤10 MB). Enqueues parse. |
+| `POST`   | `/candidates/bulk-import` | cookie | multipart `files[]` (≤50 per batch). Creates one candidate per file with a filename-derived placeholder name; queues parse for each. Per-file errors land in `results[]` without failing the batch. See [resumes-and-parsing.md](./resumes-and-parsing.md#bulk-import). |
 | `GET`    | `/candidates/{id}/resumes` | cookie | List, primary first |
 | `POST`   | `/resumes/{id}/primary` | cookie | Make this resume the primary |
 | `POST`   | `/resumes/{id}/reparse` | cookie | Resets to `pending`, re-enqueues |
 | `DELETE` | `/resumes/{id}` | cookie | Deletes object + row; promotes next-newest to primary |
 | `GET`    | `/resumes/{id}/url` | cookie | Returns `{url, expires_in}` — pre-signed download URL (5 min TTL) |
+| `GET`    | `/resumes/{id}/file` | cookie | Same-origin proxy: streams the file bytes through the API. `Content-Type` from `mime`, `Content-Disposition: inline` by default. Add `?download=true` for `attachment`. Used by the in-page PDF preview (iframe) and the download button — no dependency on `S3_PUBLIC_ENDPOINT` reaching the browser. |
 
-`Resume` shape: `{id, candidate_id, filename, mime, is_primary, parse_status, parse_error?, parsed_json?, created_at}`. `parse_status` ∈ `pending | parsing | done | failed`.
+`Resume` shape: `{id, candidate_id, filename, mime, is_primary, parse_status, parse_error?, parsed_json?, extracted_text?, created_at}`. `parse_status` ∈ `pending | parsing | done | failed`.
 
 ### Behavior changes elsewhere in M2
 
@@ -173,14 +176,14 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 
 | Method | Path | Auth | Body | Returns |
 |---|---|---|---|---|
-| `POST` | `/ask/candidate/{id}` | cookie | `{question}` | `{answer, citations: [{type, id, snippet}]}` |
+| `POST` | `/ask/candidate/{id}` | cookie | `{question}` | `{answer, citations: [{type, id, snippet, score?, percentile?}]}` |
 | `POST` | `/ask/pool` | cookie | `{question}` | `{answer, route, citations, rows?, matched_count}` |
 
 Pool answer fields:
 - `route` ∈ `structured | semantic | hybrid` — which path the classifier picked
 - `rows` (structured only) — raw rows the SQL query returned
-- `citations` (semantic/hybrid) — candidates the answer references, each with `id` so the UI can link to `/candidates/{id}`
-- `matched_count` — total candidates matched (semantic/hybrid) or row count (structured)
+- `citations` (semantic/hybrid) — candidates the answer references; each carries `id` (linkable), `snippet` (display name), `score` (raw cosine similarity, 0–1) and `percentile` (rank within filtered pool, 0–100, 100 = best match). The UI shows the percentile.
+- `matched_count` — total candidates matched (semantic/hybrid, capped at `SEMANTIC_LIMIT=50`) or row count (structured)
 
 `citations[].type` ∈ `profile | resume | note | row` (per-candidate uses the first three; pool uses `row`).
 

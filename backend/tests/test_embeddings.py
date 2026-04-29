@@ -67,6 +67,69 @@ def test_build_document_includes_skills_and_summary(db_session):
     assert "fintech" in doc
 
 
+def test_build_document_includes_full_resume_extracted_text(db_session):
+    """Regression: the embedded document used to use only parsed_json['summary'],
+    so anything mentioned in the resume body but not lifted into structured
+    fields was invisible to semantic search."""
+    from app.models.resume import Resume
+
+    c = Candidate(full_name="Asha Rao", skills=["Python"])
+    db_session.add(c)
+    db_session.commit()
+    db_session.refresh(c)
+
+    db_session.add(
+        Resume(
+            candidate_id=c.id,
+            filename="r.pdf",
+            s3_key="resumes/x.pdf",
+            mime="application/pdf",
+            is_primary=True,
+            parse_status="done",
+            parsed_json={"summary": "Backend engineer."},
+            extracted_text=(
+                "Asha Rao\nBuilt event-driven services using Apache Kafka "
+                "and Redis on the payments team."
+            ),
+        )
+    )
+    db_session.commit()
+
+    doc = build_document(db_session, c)
+    # Full resume body should be present, not just the parsed summary.
+    assert "Kafka" in doc
+    assert "Redis" in doc
+
+
+def test_build_document_caps_long_resume_text(db_session):
+    from app.services.embeddings import MAX_RESUME_CHARS
+    from app.models.resume import Resume
+
+    c = Candidate(full_name="X")
+    db_session.add(c)
+    db_session.commit()
+    db_session.refresh(c)
+
+    huge = "lorem ipsum " * 2000  # ~22 k chars, well past the cap
+    db_session.add(
+        Resume(
+            candidate_id=c.id,
+            filename="r.pdf",
+            s3_key="resumes/x.pdf",
+            mime="application/pdf",
+            is_primary=True,
+            parse_status="done",
+            extracted_text=huge,
+        )
+    )
+    db_session.commit()
+
+    doc = build_document(db_session, c)
+    # The doc has other parts (name, etc.) so we just check the resume slice
+    # didn't blow past the cap by more than a small margin.
+    assert len(doc) < MAX_RESUME_CHARS + 500
+
+
 def test_upsert_embedding_creates_then_updates(db_session):
     c = Candidate(full_name="Asha", skills=["Python"])
     db_session.add(c)

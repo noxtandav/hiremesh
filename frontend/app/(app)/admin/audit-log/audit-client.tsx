@@ -75,7 +75,10 @@ export function AuditClient({ initial }: { initial: Row[] }) {
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} className="border-t border-[var(--border)]">
-                <td className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted-foreground)]">
+                <td
+                  className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted-foreground)]"
+                  suppressHydrationWarning
+                >
                   {new Date(r.at).toLocaleString()}
                 </td>
                 <td className="px-3 py-2">{r.actor_name ?? "—"}</td>

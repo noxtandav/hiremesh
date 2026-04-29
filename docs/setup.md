@@ -24,7 +24,7 @@ cd hiremesh
 cp infra/.env.example infra/.env
 # Edit infra/.env:
 #   - generate JWT_SECRET:  openssl rand -base64 48
-#   - set BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD
+#   - (LLM model env vars are optional; the stack runs in `fake` mode without keys)
 
 make up
 ```
@@ -33,7 +33,15 @@ make up
 1. Build the `api`, `worker`, and `web` images.
 2. Start postgres (with pgvector), redis, api, worker, web, and caddy.
 3. The api container runs `alembic upgrade head` before starting uvicorn.
-4. On first boot (when the `users` table is empty), the api creates an admin from the `BOOTSTRAP_ADMIN_*` env vars. Subsequent boots are no-ops.
+
+There is **no env-based bootstrap admin** — fresh databases start empty. After `make up` completes, create the first admin via the CLI:
+
+```bash
+make admin-create EMAIL=you@example.com NAME="Your Name"
+# (you'll be prompted for a password, echo off, min 12 chars)
+```
+
+This dropped the `BOOTSTRAP_ADMIN_*` env vars deliberately: storing a password in plaintext in `.env`, only honoured on first-empty-table boot, was a prod footgun. The CLI also lets you reset a forgotten password later (`make admin-set-password EMAIL=...`) and list current admins (`make admin-list`).
 
 When everything is healthy:
 
@@ -44,13 +52,25 @@ When everything is healthy:
 | `http://localhost/api/health` | API health check (`{"status":"ok"}`) |
 | `http://localhost/api/docs` | FastAPI auto-generated API docs |
 
-Sign in with the bootstrap admin email/password from your `.env`. You'll be marked `must_change_password=true` so you should change it from the API at `POST /api/auth/me/password` (UI to follow in M1+).
+Sign in with the credentials you set via `make admin-create`. From the admin you can create other users from the in-app `/admin/users` page or `POST /api/users`.
 
 ## Environment variables
 
 See [`infra/.env.example`](../infra/.env.example) — every variable is commented inline.
 
-The two variables you must set before first boot are `JWT_SECRET` and the `BOOTSTRAP_ADMIN_*` trio. Everything else has dev-friendly defaults.
+The only variable you **must** set before first boot is `JWT_SECRET`. Everything else has dev-friendly defaults.
+
+To enable real AI features (resume parsing, semantic search, Ask), set the three LLM model env vars and a key. Each is independent — they default to `fake` so the stack runs end-to-end without any API key. See [`ops.md`](./ops.md#llm-model-configuration) for the full table; the short version:
+
+```env
+LLM_PARSE_MODEL=openrouter/openai/gpt-4o-mini
+LLM_EMBED_MODEL=openrouter/openai/text-embedding-3-small
+LLM_QA_MODEL=openrouter/openai/gpt-4o-mini
+LLM_EMBED_DIM=1536          # must match the embed model's output dim
+LLM_API_KEY=sk-or-v1-...    # OpenRouter, OpenAI, etc.
+```
+
+All three vars pass through `infra/docker-compose.yml`'s `&backend_env` block. Changes need `make up` (not just `restart`) to take effect, since adding/changing env-var passthroughs requires recreating the containers.
 
 ## Verifying the stack is healthy
 
@@ -61,7 +81,7 @@ curl -s http://localhost/api/health
 # {"status":"ok"}
 curl -s -i -X POST http://localhost/api/auth/login \
   -H "content-type: application/json" \
-  -d "{\"email\":\"$BOOTSTRAP_ADMIN_EMAIL\",\"password\":\"$BOOTSTRAP_ADMIN_PASSWORD\"}"
+  -d '{"email":"you@example.com","password":"the-password-you-set-via-cli"}'
 # 200 OK with a Set-Cookie: hiremesh_session=...
 ```
 

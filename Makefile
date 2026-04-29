@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps build rebuild api-sh web-sh test backend-test backend-fmt backend-lint migrate makemigration venv
+.PHONY: help up down logs ps build rebuild api-sh web-sh test backend-test backend-fmt backend-lint migrate makemigration venv admin-create admin-set-password admin-list
 
 ENV_FILE := infra/.env
 COMPOSE  := docker compose --env-file $(ENV_FILE) -f infra/docker-compose.yml
@@ -49,3 +49,14 @@ venv: ## Create the host dev venv and install backend deps
 	cd backend && uv venv .venv --python 3.13 && VIRTUAL_ENV=.venv uv pip install -e ".[dev]"
 
 test: backend-test ## Alias for backend-test
+
+admin-create: ## Create an admin in the running api container. Usage: make admin-create EMAIL=you@example.com [NAME="Your Name"]
+	@if [ -z "$(EMAIL)" ]; then echo "EMAIL is required: make admin-create EMAIL=you@example.com [NAME=...]"; exit 1; fi
+	$(COMPOSE) exec api python -m app.cli admin create --email "$(EMAIL)" --name "$(or $(NAME),Admin)"
+
+admin-set-password: ## Reset a user's password in the running api container. Usage: make admin-set-password EMAIL=you@example.com
+	@if [ -z "$(EMAIL)" ]; then echo "EMAIL is required: make admin-set-password EMAIL=you@example.com"; exit 1; fi
+	$(COMPOSE) exec api python -m app.cli admin set-password --email "$(EMAIL)"
+
+admin-list: ## List all admin users
+	$(COMPOSE) exec api python -m app.cli admin list

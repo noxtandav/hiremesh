@@ -10,11 +10,14 @@ upload → API → object storage (MinIO/R2)
             └→ Celery task on Redis
                   └→ worker pulls bytes
                        └→ pypdf / python-docx → text
+                            └→ stored on resume.extracted_text (powers Q&A)
                             └→ LiteLLM → parsed JSON (Pydantic-shaped)
                                  └→ apply_parsed_fields(candidate, parsed)
                                        (skips fields in candidate_field_overrides)
                                  └→ resume.parse_status = "done"
 ```
+
+Per-candidate Q&A reads `extracted_text` directly so it can answer questions about anything that appears in the resume — not just the structured fields the parser lifted into `skills` / `summary`. For legacy uploads where the column is `NULL`, the Q&A path re-extracts from object storage on demand and falls back to `parsed_json["summary"]` if storage is unreachable.
 
 `parse_status` transitions: `pending` → `parsing` → `done` | `failed`.
 
@@ -79,11 +82,43 @@ Verified by:
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | `POST`   | `/candidates/{id}/resumes` | multipart `file` (PDF/DOCX, ≤10 MB) | Returns the row in `pending` status; first upload becomes primary |
+| `POST`   | `/candidates/bulk-import` | multipart `files[]` (≤50 per batch) | Creates one candidate per file; per-file errors don't fail the batch |
 | `GET`    | `/candidates/{id}/resumes` | — | Sorted: primary first, then newest |
 | `POST`   | `/resumes/{id}/primary` | — | Demotes others on the same candidate |
 | `POST`   | `/resumes/{id}/reparse` | — | Resets to `pending`, re-enqueues |
 | `DELETE` | `/resumes/{id}` | — | Removes object and row; promotes the next-newest to primary |
-| `GET`    | `/resumes/{id}/url` | — | Returns `{url, expires_in}` — pre-signed URL valid for 5 minutes |
+| `GET`    | `/resumes/{id}/url` | — | Returns `{url, expires_in}` — pre-signed S3 download URL valid for 5 minutes |
+| `GET`    | `/resumes/{id}/file` | — | Same-origin proxy: streams resume bytes through the API. Use `?download=true` to flip `Content-Disposition` to attachment. This is what the in-page PDF preview iframe and the download button hit — no need for `S3_PUBLIC_ENDPOINT` to be reachable from the user's browser. |
+
+## In-page preview
+
+The candidate detail page renders the primary resume inline using a same-origin iframe pointed at `/api/resumes/{id}/file#view=FitH` (the URL fragment tells the browser's PDF viewer to fit-to-width). DOCX/DOC fall back to a "Download" link since browsers can't render those formats natively. If a candidate has multiple resumes, a small toggle row above the iframe switches between them. Code: `frontend/app/(app)/candidates/[id]/resume-preview.tsx`.
+
+## Adding candidates from a resume
+
+Both the **New candidate** button and the **Bulk import** button on the candidates list page route through `POST /candidates/bulk-import`. New candidate is the single-file variant: drop one PDF/DOCX, get redirected to the new candidate's detail page; the parser fills name/skills/contact within seconds (the page polls every 1.5s while parsing). Bulk import takes many files at once and shows a per-file results list. Manual entry of a candidate without a resume is still available via the API (`POST /candidates`) but is not exposed in the UI today — every candidate created through the app starts from a resume.
+
+## Duplicate detection
+
+Bulk-import can't detect duplicates at upload time — parsing is async, so identity (email, phone) isn't known until the worker finishes. Detection happens **post-parse** via `GET /candidates/{id}/duplicates`, which returns active candidates that match the target's email (case-insensitive) or phone. The candidate detail page calls this and renders an amber banner if there are matches, so a recruiter sees the warning the next time they open the candidate. We don't auto-merge: the safer default is "surface and let a human decide".
+
+## Bulk import
+
+`POST /candidates/bulk-import` is the multi-file variant of the upload flow. Each file becomes its own candidate with a placeholder name derived from the filename (`asha_rao.pdf` → `asha rao`). The parser overwrites that name when it runs — placeholders are never written to `candidate_field_overrides`, so the sticky-edit invariant is preserved (a parse result fills in the real `full_name` because there's no override).
+
+Per-file errors (bad mime, oversize, empty) are reported in the response body without aborting the batch:
+
+```json
+{
+  "imported": 2,
+  "total": 3,
+  "results": [
+    {"filename": "asha.pdf", "status": "ok", "candidate_id": 17, "resume_id": 9, "placeholder_name": "asha"},
+    {"filename": "notes.txt", "status": "error", "error": "Unsupported file type: text/plain"},
+    {"filename": "ben.docx", "status": "ok", "candidate_id": 18, "resume_id": 10, "placeholder_name": "ben"}
+  ]
+}
+```
 
 ## Failure modes
 

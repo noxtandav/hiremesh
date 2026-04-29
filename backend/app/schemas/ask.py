@@ -11,6 +11,8 @@ class Citation(BaseModel):
     type: Literal["profile", "resume", "note", "row"]
     id: int | None = None
     snippet: str
+    score: float | None = None  # cosine similarity for semantic hits; null otherwise
+    percentile: float | None = None  # rank within filtered pool, 100 = best match
 
 
 class AskAnswer(BaseModel):

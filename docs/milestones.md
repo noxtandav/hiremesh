@@ -193,3 +193,36 @@ What's actually shipped and verified, milestone by milestone. The forward-lookin
 ## All milestones complete 🎉
 
 Hiremesh's planned scope (M0–M6) is shipped. See [`hiremesh-plan.md`](../hiremesh-plan.md) for the original plan; this file is the rear-view of what was actually built and verified at each step.
+
+## Post-M6 enhancements
+
+Iterations after the original plan, driven by real-world use:
+
+**Bulk import + resume-only intake (extends M2):**
+- `POST /candidates/bulk-import` — upload many PDFs/DOCXs at once, one candidate per file with a filename-derived placeholder name; per-file errors reported in the response without aborting the batch.
+- The frontend "New candidate" button is now a single-file resume drop zone that calls bulk-import internally. Manual-form entry is still possible via API but no longer exposed in the UI.
+- "Bulk import" button alongside it on the candidates list page.
+
+**Same-origin resume serving + in-page preview (extends M2):**
+- `GET /resumes/{id}/file` streams resume bytes through the API instead of a presigned S3 URL — fixes preview/download when the user's browser is on a different host than MinIO/R2 (LAN access, Caddy front-door, etc.).
+- `ResumePreview` component renders the primary resume inline via an iframe at `/api/resumes/{id}/file#view=FitH`. DOCX/DOC fall back to a download link.
+
+**Full resume body in Q&A and embeddings (extends M2/M4/M5):**
+- New `resumes.extracted_text` column (migration `dd04e5b9a3c2`) — populated by the parse worker so per-candidate Ask and the embedding builder both see the *full* resume body, not just the LLM's parsed `summary`. Fixed a class of bug where techs mentioned in prose (project descriptions, work history) couldn't be retrieved.
+- Shared helper `app/services/resume_text.py:get_resume_text` — `extracted_text` > re-extract from S3 > `parsed_json["summary"]` fallback chain. Used by both consumers.
+- `build_document` now caps the resume slice at `MAX_RESUME_CHARS=6000` so a freakishly long resume can't dominate the embed budget.
+
+**Duplicate detection (extends M1):**
+- `GET /candidates/{id}/duplicates` — returns active candidates matching by `lower(email)` or exact `phone`, excluding self and soft-deleted. Computed on demand (no new column).
+- Candidate detail page shows an amber banner when matches exist. Detection happens post-parse: bulk-import can't know identity at upload time because parsing is async.
+
+**Better pool-Q&A ranking UX (extends M5):**
+- `_semantic_pick` returns up to `SEMANTIC_LIMIT=50` ranked candidates (was 10). Synthesis still uses top `SYNTHESIS_TOP_K=10` so the LLM call stays focused.
+- Each citation carries `score` (raw cosine) and `percentile` (rank within the filtered pool, 0–100, 100 = best match). The UI displays the percentile because absolute cosine values vary wildly between embedding models — `text-embedding-3-small` and `voyage-3-large` cluster scores differently, but "top 5% of matches" reads the same regardless.
+
+**Compose env passthrough fix (ops):**
+- `LLM_QA_MODEL` was missing from `infra/docker-compose.yml`'s backend env block, so setting it in `.env` had no effect (containers fell back to `fake`). Fixed and added to `.env.example`.
+
+**Admin bootstrap → CLI (ops):**
+- Removed `BOOTSTRAP_ADMIN_*` env-based first-boot admin (and the lifespan hook that consumed it). Plaintext credentials in `.env` are a prod hazard.
+- New CLI at `app/cli.py` with `admin create | set-password | list` subcommands; `make admin-create EMAIL=...`, `make admin-set-password EMAIL=...`, `make admin-list` wrappers. Interactive password prompt, echo-off, min 12 chars. Tests at `backend/tests/test_cli.py`.

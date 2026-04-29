@@ -21,3 +21,18 @@ class ResumeOut(BaseModel):
 class PresignedUrl(BaseModel):
     url: str
     expires_in: int
+
+
+class BulkImportResult(BaseModel):
+    filename: str
+    status: Literal["ok", "error"]
+    candidate_id: int | None = None
+    resume_id: int | None = None
+    placeholder_name: str | None = None
+    error: str | None = None
+
+
+class BulkImportResponse(BaseModel):
+    imported: int
+    total: int
+    results: list[BulkImportResult]

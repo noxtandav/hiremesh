@@ -34,6 +34,7 @@ def parse_resume(self, resume_id: int) -> dict:
         try:
             body = storage.get_object(resume.s3_key)
             text = extract_text(resume.filename, body)
+            resume.extracted_text = text or None
             parsed = llm.parse_resume_text(text)
 
             resume.parsed_json = parsed

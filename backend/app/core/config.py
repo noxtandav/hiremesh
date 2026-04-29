@@ -26,10 +26,6 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
-    bootstrap_admin_email: str | None = None
-    bootstrap_admin_password: str | None = None
-    bootstrap_admin_name: str = "Admin"
-
     # Object storage (MinIO in dev, R2 in prod).
     s3_endpoint: str = "http://minio:9000"
     s3_public_endpoint: str = "http://localhost:9000"

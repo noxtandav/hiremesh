@@ -136,3 +136,29 @@ def search(db: Session, req: SearchRequest) -> list[tuple[Candidate, float | Non
     if req.q and req.q.strip():
         return semantic(db, req)
     return filter_only(db, req)
+
+
+def count(db: Session, req: SearchRequest) -> int:
+    """Total candidates that match these filters, ignoring limit/offset.
+
+    When `q` is set we count candidates that have an embedding (the inner
+    join the semantic path uses), so the result reflects the same pool
+    semantic ranking actually saw — which is what percentile computation
+    needs.
+    """
+    if req.q and req.q.strip():
+        stmt = (
+            select(func.count())
+            .select_from(Candidate)
+            .join(
+                CandidateEmbedding,
+                CandidateEmbedding.candidate_id == Candidate.id,
+            )
+            .where(*_filters(req), CandidateEmbedding.source == "combined")
+        )
+    else:
+        stmt = select(func.count()).select_from(Candidate).where(*_filters(req))
+    sub = _stage_subquery(req)
+    if sub is not None:
+        stmt = stmt.where(sub)
+    return int(db.scalar(stmt) or 0)

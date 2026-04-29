@@ -36,10 +36,12 @@ candidate / resume parse / manual reindex
 - `full_name`, `current_title`, `current_company`, `location`, `summary`
 - `skills` (joined with commas)
 - `total_exp_years`, `notice_period_days`
-- The `summary` field of the **primary** resume's `parsed_json` (which the parser fills with the full extracted text)
+- The **full extracted text** of the primary resume (via `app/services/resume_text.py:get_resume_text`), capped at `MAX_RESUME_CHARS` (6000) so a freakishly long resume can't dominate the embedding budget. Fallback chain matches per-candidate Q&A: `extracted_text` > re-extract from object storage > `parsed_json["summary"]`.
 - All **global** notes (`candidate_job_id IS NULL`)
 
-Link-scoped notes (notes attached to a specific job) are excluded — they're commentary about a candidate's current placement, not signal we want to retrieve on across the whole pool. (We'll re-evaluate when M5's pool Q&A lands.)
+Link-scoped notes (notes attached to a specific job) are excluded — they're commentary about a candidate's current placement, not signal we want to retrieve on across the whole pool.
+
+> **Migrating existing data** — older candidates (uploaded when the embedding only contained `parsed_json["summary"]`) keep their stale vectors until you re-embed them. `POST /admin/reindex/candidates` re-runs `build_document` for every active candidate and refreshes the vector. With `text-embedding-3-small` that's one API call per candidate (≈ $0.02 / 1M tokens, so a few thousand candidates cost cents).
 
 ### When embeddings refresh
 
@@ -244,6 +246,10 @@ The plan called this "the part where the user asks a question across the whole p
 | `hybrid` | filter + fuzzy together | classifier → both: structured filters constrain the candidate set, semantic ranks survivors |
 
 The classifier is one small JSON-mode LLM call. In `fake` mode, it's regex over the question.
+
+**Result sizing for semantic / hybrid**: `_semantic_pick` returns up to `SEMANTIC_LIMIT` (50) ranked candidates so recruiters can browse beyond just the top few. The synthesis call (the narrative `answer`) only reads the top `SYNTHESIS_TOP_K` (10) — keeps the LLM call focused and cheap.
+
+**Percentile vs. cosine score**: Each citation carries both `score` (raw cosine similarity, 0–1) and `percentile` (rank within the filtered pool, 0–100, 100 = best match). The UI shows the percentile because absolute cosine similarity varies wildly between embedding models — `text-embedding-3-small` clusters scores differently from `voyage-3-large` — and "this candidate is in the top 5% of matches for your query" is a more honest read than "0.78 cosine". The cosine score is still surfaced via the badge tooltip for anyone who wants to inspect it. Formula: `(pool_size - rank + 1) / pool_size * 100`. The pool size respects hybrid filters: a query like "Python devs in Pune" computes percentile relative to other Python-Pune candidates only.
 
 ### The safety boundary
 

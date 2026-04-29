@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -92,6 +92,42 @@ def soft_delete_candidate(
         entity_id=candidate_id, payload={"full_name": obj.full_name},
     )
     db.commit()
+
+
+@router.get("/{candidate_id}/duplicates", response_model=list[CandidateOut])
+def list_duplicates(
+    candidate_id: int,
+    _user: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Candidates that look like the same person — same email (case-insensitive)
+    or same phone — excluding self and soft-deleted rows.
+
+    The bulk-import path can't run this at upload time (parse is async, so
+    email/phone aren't known yet). This endpoint is meant to be called from
+    the candidate detail page so the banner appears as soon as parsing fills
+    those fields in.
+    """
+    candidate = _get_active_or_404(db, candidate_id)
+
+    conditions = []
+    if candidate.email:
+        conditions.append(func.lower(Candidate.email) == candidate.email.lower())
+    if candidate.phone:
+        conditions.append(Candidate.phone == candidate.phone)
+    if not conditions:
+        return []
+
+    stmt = (
+        select(Candidate)
+        .where(
+            Candidate.id != candidate.id,
+            Candidate.deleted_at.is_(None),
+            or_(*conditions),
+        )
+        .order_by(Candidate.created_at.asc())
+    )
+    return list(db.scalars(stmt).all())
 
 
 @router.post("/{candidate_id}/restore", response_model=CandidateOut)

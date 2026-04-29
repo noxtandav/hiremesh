@@ -76,7 +76,10 @@ export function Notes({
           >
             <p className="whitespace-pre-wrap text-sm">{n.body}</p>
             <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
-              <span className="font-mono uppercase tracking-[0.18em]">
+              <span
+                className="font-mono uppercase tracking-[0.18em]"
+                suppressHydrationWarning
+              >
                 {new Date(n.created_at).toLocaleString()}
               </span>
               <button

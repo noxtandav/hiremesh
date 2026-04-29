@@ -222,6 +222,56 @@ def test_presigned_url_endpoint(client, fake_storage, inline_parse):
     assert body["expires_in"] == 300
 
 
+def test_stream_resume_file_returns_bytes_inline(client, fake_storage, inline_parse):
+    _login(client, **ADMIN)
+    cid = client.post("/candidates", json={"full_name": "X"}).json()["id"]
+
+    body = b"%PDF-1.4 fake content"
+    rid = client.post(
+        f"/candidates/{cid}/resumes",
+        files={"file": ("a.pdf", io.BytesIO(body), "application/pdf")},
+    ).json()["id"]
+
+    r = client.get(f"/resumes/{rid}/file")
+    assert r.status_code == 200
+    assert r.content == body
+    assert r.headers["content-type"].startswith("application/pdf")
+    assert "inline" in r.headers["content-disposition"]
+    assert "a.pdf" in r.headers["content-disposition"]
+
+
+def test_stream_resume_file_attachment_when_download(client, fake_storage, inline_parse):
+    _login(client, **ADMIN)
+    cid = client.post("/candidates", json={"full_name": "X"}).json()["id"]
+    rid = client.post(
+        f"/candidates/{cid}/resumes",
+        files={"file": ("a.pdf", io.BytesIO(b"x"), "application/pdf")},
+    ).json()["id"]
+
+    r = client.get(f"/resumes/{rid}/file?download=true")
+    assert r.status_code == 200
+    assert "attachment" in r.headers["content-disposition"]
+
+
+def test_stream_resume_file_unauthenticated(client, fake_storage, inline_parse):
+    _login(client, **ADMIN)
+    cid = client.post("/candidates", json={"full_name": "X"}).json()["id"]
+    rid = client.post(
+        f"/candidates/{cid}/resumes",
+        files={"file": ("a.pdf", io.BytesIO(b"x"), "application/pdf")},
+    ).json()["id"]
+    client.post("/auth/logout")
+
+    r = client.get(f"/resumes/{rid}/file")
+    assert r.status_code == 401
+
+
+def test_stream_resume_file_unknown_id(client, fake_storage):
+    _login(client, **ADMIN)
+    r = client.get("/resumes/99999/file")
+    assert r.status_code == 404
+
+
 def test_delete_resume_promotes_next_primary(client, fake_storage, inline_parse):
     _login(client, **ADMIN)
     cid = client.post("/candidates", json={"full_name": "X"}).json()["id"]

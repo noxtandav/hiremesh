@@ -12,6 +12,14 @@ from app.models.candidate import Candidate
 from app.models.embedding import CandidateEmbedding
 from app.models.note import Note
 from app.models.resume import Resume
+from app.services.resume_text import get_resume_text
+
+# Soft cap on the resume body chunk that goes into the embedding document.
+# `text-embedding-3-small` accepts 8192 tokens (~24k chars of English); we
+# stay well under that with the rest of the document (profile + notes) and
+# keep tokens proportional to *new* information instead of letting one long
+# resume dominate the bill.
+MAX_RESUME_CHARS = 6000
 
 
 def build_document(db: Session, candidate: Candidate) -> str:
@@ -42,11 +50,10 @@ def build_document(db: Session, candidate: Candidate) -> str:
         .where(Resume.candidate_id == candidate.id, Resume.is_primary.is_(True))
         .limit(1)
     )
-    if primary is not None and primary.parsed_json:
-        # parsed_json["summary"] usually contains the full extracted text.
-        summary = primary.parsed_json.get("summary")
-        if summary:
-            parts.append(str(summary))
+    if primary is not None:
+        text = get_resume_text(primary)
+        if text:
+            parts.append(text[:MAX_RESUME_CHARS])
 
     notes = list(
         db.scalars(
