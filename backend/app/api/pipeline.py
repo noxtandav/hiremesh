@@ -1,7 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -15,6 +15,7 @@ from app.schemas.pipeline import (
     BoardColumn,
     CandidateJobOut,
     CandidateJobWithCandidate,
+    LastTransition,
     LinkRequest,
     MoveRequest,
     StageTransitionOut,
@@ -54,12 +55,47 @@ def get_board(
     except LookupError as e:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
 
+    # Hydrate the most recent transition per candidate within this job so
+    # the kanban can show "moved Xd ago by Y" without a per-card fetch.
+    # Use max(id) as the tiebreaker rather than max(at) — id is monotonic
+    # within an autoincrement column, so it's reliable even when two rows
+    # share the same timestamp.
+    latest_id_per_candidate = (
+        select(
+            StageTransition.candidate_id.label("cid"),
+            func.max(StageTransition.id).label("max_id"),
+        )
+        .where(StageTransition.job_id == job_id)
+        .group_by(StageTransition.candidate_id)
+        .subquery()
+    )
+    last_rows = db.execute(
+        select(StageTransition, User.name)
+        .select_from(StageTransition)
+        .join(
+            latest_id_per_candidate,
+            StageTransition.id == latest_id_per_candidate.c.max_id,
+        )
+        .outerjoin(User, User.id == StageTransition.by_user)
+    ).all()
+    last_by_candidate: dict[int, LastTransition] = {
+        t.candidate_id: LastTransition(
+            at=t.at,
+            by_user_id=t.by_user,
+            by_user_name=user_name,
+            from_stage_id=t.from_stage_id,
+            to_stage_id=t.to_stage_id,
+        )
+        for t, user_name in last_rows
+    }
+
     by_stage: dict[int, list[CandidateJobWithCandidate]] = {s.id: [] for s in stages}
     for link, candidate in rows:
         by_stage[link.current_stage_id].append(
             CandidateJobWithCandidate(
                 **CandidateJobOut.model_validate(link).model_dump(),
                 candidate=CandidateOut.model_validate(candidate),
+                last_transition=last_by_candidate.get(candidate.id),
             )
         )
     return [

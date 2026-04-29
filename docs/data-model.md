@@ -31,7 +31,8 @@ candidates
 ├── skills (JSON list[str])
 ├── summary                                job_stages
 ├── deleted_at  (NULL = active)            ├── id
-└── created_at                             ├── job_id  → jobs (CASCADE)
+├── created_at                             ├── job_id  → jobs (CASCADE)
+└── created_by → users (SET NULL)
                                            ├── name
 notes                                      └── position
 ├── id
@@ -53,7 +54,8 @@ notes                                      └── position
 ## Why these choices
 
 - **`skills` as JSON, not Postgres ARRAY** — works on both Postgres (jsonb) and SQLite (used in tests). The data shape is identical from app code's perspective. Switching to `text[]` later is a one-line migration if we ever need GIN-indexed array containment.
-- **No `created_by` on clients/candidates** — the plan doesn't require it and we don't want to back-fill `null`s when running the migration on existing data later. Notes and jobs do track `created_by` because attribution matters there.
+- **No `created_by` on clients** — the plan doesn't require it and we don't want to back-fill `null`s when running the migration on existing data later. Notes and jobs do track `created_by` because attribution matters there.
+- **`created_by` on candidates** — added post-M6 (migration `ee05f6c8d2a1`) once the asymmetry started to bite: the link drawer already showed *who moved* a candidate but the candidate page couldn't show *who added* them, so recruiters had to dig into the audit log. Existing rows get `NULL`; populated for everything created after the migration.
 - **`ON DELETE` policies are explicit** — `RESTRICT` for client→jobs (forces a deliberate close), `CASCADE` for job→job_stages and candidate→notes (the children make no sense without their parent), `SET NULL` for user references (we don't want a deactivated recruiter to vacuum out their notes).
 - **Numerics use `Numeric(p,s)`, not `float`** — CTC and experience hold money/time and shouldn't drift in binary float.
 
@@ -69,6 +71,7 @@ notes                                      └── position
 | `bb02d6f3a8e1` | m5 v_candidate_search view | read-only `v_candidate_search` view (Postgres only) — the only surface the pool-Q&A SQL path can read |
 | `cc03e9a4b2f7` | m6 audit_log | `audit_log` table — operational write-side event log |
 | `dd04e5b9a3c2` | resume extracted text | `resumes.extracted_text` — raw extracted body, used as Q&A context |
+| `ee05f6c8d2a1` | candidate created_by | `candidates.created_by` (FK → users, SET NULL) — first-class attribution for who added each candidate |
 
 ## M2 additions
 

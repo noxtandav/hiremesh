@@ -138,3 +138,131 @@ def test_duplicates_404_for_unknown_candidate(client):
     r = client.get("/candidates/99999/duplicates")
     assert r.status_code == 404
 
+
+def test_created_by_set_on_creation(client):
+    _login(client, **ADMIN)
+    me = client.get("/auth/me").json()
+    cid = client.post(
+        "/candidates", json={"full_name": "With Owner"}
+    ).json()["id"]
+
+    detail = client.get(f"/candidates/{cid}").json()
+    assert detail["created_by"] == me["id"]
+    assert detail["created_by_name"] == me["name"]
+
+
+def test_created_by_hydrates_recruiter_name(client):
+    _login(client, **ADMIN)
+    client.post(
+        "/users",
+        json={
+            "email": "rec@example.com",
+            "name": "Rec One",
+            "password": "rec-pass-12345",
+            "role": "recruiter",
+        },
+    )
+    client.post("/auth/logout")
+    client.post(
+        "/auth/login", json={"email": "rec@example.com", "password": "rec-pass-12345"}
+    )
+
+    cid = client.post(
+        "/candidates", json={"full_name": "By Recruiter"}
+    ).json()["id"]
+    detail = client.get(f"/candidates/{cid}").json()
+    assert detail["created_by_name"] == "Rec One"
+
+
+def test_list_endpoint_does_not_hydrate_creator_name(client):
+    """List view skips the per-row name lookup. It still exposes created_by
+    (the int id) so a UI that wants names can choose to fan out."""
+    _login(client, **ADMIN)
+    me = client.get("/auth/me").json()
+    client.post("/candidates", json={"full_name": "A"})
+    client.post("/candidates", json={"full_name": "B"})
+
+    rows = client.get("/candidates").json()
+    assert all(r["created_by"] == me["id"] for r in rows)
+    assert all(r["created_by_name"] is None for r in rows)
+
+
+def test_bulk_import_records_creator(client, fake_storage, captured_enqueue):
+    _login(client, **ADMIN)
+    me = client.get("/auth/me").json()
+    files = [
+        ("files", ("asha.pdf", io.BytesIO(b"%PDF-fake"), "application/pdf")),
+        ("files", ("ben.pdf", io.BytesIO(b"%PDF-fake2"), "application/pdf")),
+    ]
+    body = client.post("/candidates/bulk-import", files=files).json()
+
+    for r in body["results"]:
+        if r["status"] == "ok":
+            detail = client.get(f"/candidates/{r['candidate_id']}").json()
+            assert detail["created_by"] == me["id"]
+            assert detail["created_by_name"] == me["name"]
+
+
+def test_bulk_import_writes_per_candidate_audit_rows(client, fake_storage, captured_enqueue):
+    _login(client, **ADMIN)
+    files = [
+        ("files", ("a.pdf", io.BytesIO(b"%PDF-1"), "application/pdf")),
+        ("files", ("b.pdf", io.BytesIO(b"%PDF-2"), "application/pdf")),
+    ]
+    client.post("/candidates/bulk-import", files=files)
+
+    rows = client.get(
+        "/admin/audit-log", params={"action": "candidate.create"}
+    ).json()
+    via_bulk = [r for r in rows if r.get("payload", {}).get("via") == "bulk_import"]
+    assert len(via_bulk) == 2
+    assert all(r["entity"] == "candidate" for r in via_bulk)
+    assert all(r["entity_id"] is not None for r in via_bulk)
+
+
+# Fixtures borrowed from test_bulk_import.py — duplicated here to keep
+# tests independent. The shared fixture pattern would need a conftest
+# refactor that's out of scope for this addition.
+import io  # noqa: E402
+
+import pytest  # noqa: E402
+
+from app.api import resumes as resumes_api  # noqa: E402
+from app.core import storage  # noqa: E402
+from app.workers.tasks import parse_resume as parse_task  # noqa: E402
+
+
+@pytest.fixture
+def fake_storage(monkeypatch):
+    blobs: dict[str, bytes] = {}
+
+    def put_object(key: str, body, content_type: str) -> None:
+        if hasattr(body, "read"):
+            body = body.read()
+        blobs[key] = body
+
+    def get_object(key: str) -> bytes:
+        return blobs[key]
+
+    def presigned_get_url(key: str, expires_in: int = 300) -> str:
+        return f"http://stub.test/{key}?ttl={expires_in}"
+
+    def delete_object(key: str) -> None:
+        blobs.pop(key, None)
+
+    for mod in (storage, resumes_api.storage, parse_task.storage):
+        monkeypatch.setattr(mod, "put_object", put_object, raising=True)
+        monkeypatch.setattr(mod, "get_object", get_object, raising=True)
+        monkeypatch.setattr(mod, "presigned_get_url", presigned_get_url, raising=True)
+        monkeypatch.setattr(mod, "delete_object", delete_object, raising=True)
+    return blobs
+
+
+@pytest.fixture
+def captured_enqueue(monkeypatch):
+    captured: list[int] = []
+    monkeypatch.setattr(
+        resumes_api, "_enqueue_parse", lambda rid: captured.append(rid), raising=True
+    )
+    return captured
+

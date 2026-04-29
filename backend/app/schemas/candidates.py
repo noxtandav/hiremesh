@@ -20,6 +20,11 @@ class CandidateOut(BaseModel):
     summary: str | None = None
     deleted_at: datetime | None = None
     created_at: datetime
+    created_by: int | None = None
+    # Hydrated by the detail endpoint so the UI can render "Added by X"
+    # without a second round-trip. Null on list endpoints (each row would
+    # require a separate user lookup; the list view doesn't need it).
+    created_by_name: str | None = None
 
     model_config = {"from_attributes": True}
 

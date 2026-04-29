@@ -224,3 +224,50 @@ def test_link_scoped_note(client):
 
     link_notes = client.get(f"/candidate-jobs/{link['id']}/notes").json()
     assert [n["id"] for n in link_notes] == [s["id"]]
+
+
+def test_board_includes_last_transition_with_actor_name(client):
+    _login(client, **ADMIN)
+    me = client.get("/auth/me").json()
+    job_id, stages = _setup_job(client)
+    cand_id = client.post(
+        "/candidates", json={"full_name": "Asha"}
+    ).json()["id"]
+    link = client.post(
+        f"/jobs/{job_id}/candidates", json={"candidate_id": cand_id}
+    ).json()
+    # Move once so the latest transition is the move (not the initial link).
+    client.patch(
+        f"/candidate-jobs/{link['id']}", json={"stage_id": stages[2]["id"]}
+    )
+
+    board = client.get(f"/jobs/{job_id}/board").json()
+    moved_link = next(
+        l for col in board for l in col["links"] if l["id"] == link["id"]
+    )
+    lt = moved_link["last_transition"]
+    assert lt is not None
+    assert lt["by_user_id"] == me["id"]
+    assert lt["by_user_name"] == me["name"]
+    assert lt["from_stage_id"] == stages[0]["id"]
+    assert lt["to_stage_id"] == stages[2]["id"]
+
+
+def test_board_last_transition_is_initial_link_when_no_moves(client):
+    _login(client, **ADMIN)
+    job_id, stages = _setup_job(client)
+    cand_id = client.post(
+        "/candidates", json={"full_name": "Just Linked"}
+    ).json()["id"]
+    link = client.post(
+        f"/jobs/{job_id}/candidates", json={"candidate_id": cand_id}
+    ).json()
+
+    board = client.get(f"/jobs/{job_id}/board").json()
+    only_link = next(
+        l for col in board for l in col["links"] if l["id"] == link["id"]
+    )
+    lt = only_link["last_transition"]
+    assert lt is not None
+    assert lt["from_stage_id"] is None  # initial link rows have null from
+    assert lt["to_stage_id"] == stages[0]["id"]

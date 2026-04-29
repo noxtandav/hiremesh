@@ -106,7 +106,18 @@ export default async function CandidateDetailPage({
                 ? `${candidate.notice_period_days} days`
                 : null,
             )}
-            {detail("Added", candidate.created_at.slice(0, 10))}
+            {detail(
+              "Added",
+              <>
+                {candidate.created_at.slice(0, 10)}
+                {candidate.created_by_name ? (
+                  <span className="text-[var(--muted-foreground)]">
+                    {" · by "}
+                    {candidate.created_by_name}
+                  </span>
+                ) : null}
+              </>,
+            )}
           </div>
 
           {candidate.skills.length ? (

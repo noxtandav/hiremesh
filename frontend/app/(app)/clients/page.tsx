@@ -31,7 +31,7 @@ export default async function ClientsPage() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {clients.map((c) => (
             <Link key={c.id} href={`/clients/${c.id}`}>
-              <Card className="h-full p-5 transition-colors hover:bg-[var(--muted)]">
+              <Card className="flex h-full flex-col p-5 transition-colors hover:bg-[var(--muted)]">
                 <CardEyebrow>Client</CardEyebrow>
                 <div className="mt-2 text-lg font-semibold tracking-tight">
                   {c.name}
@@ -41,6 +41,42 @@ export default async function ClientsPage() {
                     {c.notes}
                   </p>
                 ) : null}
+
+                <div className="mt-auto grid grid-cols-3 gap-3 border-t border-[var(--border)] pt-4">
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                      Jobs
+                    </div>
+                    <div className="mt-1 text-sm tabular-nums">
+                      <span className="font-semibold">{c.jobs_open}</span>
+                      <span className="text-[var(--muted-foreground)]">
+                        {" "}/ {c.jobs_total}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                      Candidates
+                    </div>
+                    <div className="mt-1 text-sm font-semibold tabular-nums">
+                      {c.candidates_total}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                      Last 7d
+                    </div>
+                    <div className="mt-1 text-sm tabular-nums">
+                      {c.candidates_recent > 0 ? (
+                        <span className="font-semibold text-emerald-600">
+                          +{c.candidates_recent}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--muted-foreground)]">—</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </Card>
             </Link>
           ))}

@@ -214,6 +214,11 @@ export function CandidateSearch({
                     .filter(Boolean)
                     .join(" · ")}
                 </div>
+                {c.email || c.phone ? (
+                  <div className="mt-1 truncate text-xs text-[var(--muted-foreground)]">
+                    {[c.email, c.phone].filter(Boolean).join(" · ")}
+                  </div>
+                ) : null}
                 {c.skills.length ? (
                   <div className="mt-1 truncate text-xs text-[var(--muted-foreground)]">
                     {c.skills.slice(0, 6).join(", ")}

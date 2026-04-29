@@ -132,6 +132,61 @@ def reset_embeddings(
     return {"reset": True, "dim": target_dim, "enqueued": len(ids)}
 
 
+# ----- bulk reparse (post-M6) -------------------------------------------
+
+
+@router.post("/reparse/resumes")
+def reparse_all_resumes(
+    admin: Annotated[User, Depends(require_admin)],
+    db: Annotated[Session, Depends(get_db)],
+    confirm: bool = False,
+):
+    """Re-run the parse pipeline on every resume.
+
+    Without `?confirm=true` this returns the count that *would* be processed,
+    so the UI can show "this will reparse N resumes — costs apply" before
+    actually enqueuing anything.
+
+    With `?confirm=true`: reset every resume's `parse_status` to `pending`,
+    clear `parse_error`, and enqueue a `parse_resume` task per id. Each task
+    chains an `embed_candidate` task on success, so this also implicitly
+    refreshes the candidate embeddings.
+
+    Use after changing `LLM_PARSE_MODEL` — new uploads pick up the new model
+    immediately, but older candidates keep their old `parsed_json` until a
+    reparse rebuilds them. Costs apply (one parse-model call per resume +
+    one embed-model call per candidate). The sticky-edit invariant still
+    holds: any field a recruiter manually overrode stays put.
+    """
+    total = db.scalar(select(func.count()).select_from(Resume)) or 0
+    if not confirm:
+        return {
+            "would_enqueue": int(total),
+            "warning": (
+                f"Will reparse {int(total)} resumes. Each runs the configured "
+                f"parse model once and chains a re-embed. Pass "
+                f"?confirm=true to proceed."
+            ),
+        }
+
+    from app.workers.tasks.parse_resume import parse_resume
+
+    resume_ids = list(db.scalars(select(Resume.id)).all())
+    db.execute(
+        Resume.__table__.update().values(parse_status="pending", parse_error=None)
+    )
+    audit_record(
+        db, actor_id=admin.id, action="resumes.reparse_all", entity="system",
+        payload={"enqueued": len(resume_ids)},
+    )
+    db.commit()
+
+    for rid in resume_ids:
+        parse_resume.delay(rid)
+
+    return {"reparsed": True, "enqueued": len(resume_ids)}
+
+
 # ----- audit log viewer (M6) --------------------------------------------
 
 

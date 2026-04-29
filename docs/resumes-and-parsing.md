@@ -102,6 +102,17 @@ Both the **New candidate** button and the **Bulk import** button on the candidat
 
 Bulk-import can't detect duplicates at upload time — parsing is async, so identity (email, phone) isn't known until the worker finishes. Detection happens **post-parse** via `GET /candidates/{id}/duplicates`, which returns active candidates that match the target's email (case-insensitive) or phone. The candidate detail page calls this and renders an amber banner if there are matches, so a recruiter sees the warning the next time they open the candidate. We don't auto-merge: the safer default is "surface and let a human decide".
 
+## Bulk reparse (after changing the parse model)
+
+`POST /admin/reparse/resumes` re-runs the parse pipeline on every resume in the database. Use it when you've switched `LLM_PARSE_MODEL` — new uploads pick up the new model immediately, but older candidates keep `parsed_json` extracted by the old one until a reparse rebuilds them.
+
+The UX is two-step to avoid surprise bills:
+
+1. First call (no params) → `{would_enqueue: N, warning: "..."}`. The admin button on `/admin/metrics` uses this to show "This will reparse N resumes — costs apply. Continue?"
+2. Confirm call (`?confirm=true`) resets every resume's status to `pending`, clears any prior `parse_error`, and enqueues one `parse_resume` task per id.
+
+Each parse task chains an `embed_candidate` task on success, so this also implicitly refreshes the embeddings — usually what you want, since changing the parse model also changes which structured fields end up on the candidate, which changes the document the embed model sees. Manual recruiter edits are preserved by the sticky-edit invariant: any field present in `candidate_field_overrides` is left untouched.
+
 ## Bulk import
 
 `POST /candidates/bulk-import` is the multi-file variant of the upload flow. Each file becomes its own candidate with a placeholder name derived from the filename (`asha_rao.pdf` → `asha rao`). The parser overwrites that name when it runs — placeholders are never written to `candidate_field_overrides`, so the sticky-edit invariant is preserved (a parse result fills in the real `full_name` because there's no override).

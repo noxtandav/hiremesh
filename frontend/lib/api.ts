@@ -29,6 +29,14 @@ export type Client = {
   created_at: string;
 };
 
+// Returned by GET /clients (list). Detail/create/update endpoints return Client.
+export type ClientWithStats = Client & {
+  jobs_open: number;
+  jobs_total: number;
+  candidates_total: number;
+  candidates_recent: number; // last 7 days
+};
+
 export type Stage = { id: number; name: string; position: number };
 
 export type JobStatus = "open" | "on-hold" | "closed";
@@ -46,6 +54,12 @@ export type Job = {
   created_at: string;
 };
 export type JobWithStages = Job & { stages: Stage[] };
+// Returned by GET /jobs (list). Detail/create return JobWithStages.
+export type JobWithStats = Job & {
+  candidates_total: number;
+  candidates_recent: number; // last 7 days
+  moves_recent: number; // stage transitions in last 7 days
+};
 
 export type Candidate = {
   id: number;
@@ -63,6 +77,9 @@ export type Candidate = {
   summary: string | null;
   deleted_at: string | null;
   created_at: string;
+  created_by: number | null;
+  // Hydrated by GET /candidates/{id}; null on the list endpoint.
+  created_by_name: string | null;
 };
 
 export type Note = {
@@ -92,6 +109,14 @@ export type CandidateJob = {
   job_id: number;
   current_stage_id: number;
   linked_at: string;
+};
+
+export type LastTransition = {
+  at: string;
+  by_user_id: number | null;
+  by_user_name: string | null;
+  from_stage_id: number | null;
+  to_stage_id: number | null;
 };
 
 export type StageTransition = {
@@ -160,7 +185,8 @@ export const api = {
   me: (cookie?: string) => request<User>("/auth/me", { cookie }),
 
   // clients
-  listClients: (cookie?: string) => request<Client[]>("/clients", { cookie }),
+  listClients: (cookie?: string) =>
+    request<ClientWithStats[]>("/clients", { cookie }),
   getClient: (id: number, cookie?: string) =>
     request<Client>(`/clients/${id}`, { cookie }),
   createClient: (data: { name: string; notes?: string }) =>
@@ -177,7 +203,7 @@ export const api = {
   listJobs: (
     params: { client_id?: number; status_filter?: JobStatus } = {},
     cookie?: string,
-  ) => request<Job[]>(`/jobs${qs(params)}`, { cookie }),
+  ) => request<JobWithStats[]>(`/jobs${qs(params)}`, { cookie }),
   getJob: (id: number, cookie?: string) =>
     request<JobWithStages>(`/jobs/${id}`, { cookie }),
   createJob: (data: {
@@ -312,6 +338,16 @@ export const api = {
       `/admin/embeddings/reset?confirm=true${skipProbe ? "&skip_probe=true" : ""}`,
       { method: "POST" },
     ),
+  reparseAllResumesPreview: () =>
+    request<{ would_enqueue: number; warning: string }>(
+      "/admin/reparse/resumes",
+      { method: "POST" },
+    ),
+  reparseAllResumesConfirm: () =>
+    request<{ reparsed: true; enqueued: number }>(
+      "/admin/reparse/resumes?confirm=true",
+      { method: "POST" },
+    ),
   listUsers: (cookie?: string) => request<User[]>("/users", { cookie }),
   updateUser: (
     id: number,
@@ -368,7 +404,10 @@ export const api = {
     request<
       {
         stage: Stage;
-        links: (CandidateJob & { candidate: Candidate })[];
+        links: (CandidateJob & {
+          candidate: Candidate;
+          last_transition: LastTransition | null;
+        })[];
       }[]
     >(`/jobs/${jobId}/board`, { cookie }),
   linkCandidateToJob: (jobId: number, candidateId: number) =>

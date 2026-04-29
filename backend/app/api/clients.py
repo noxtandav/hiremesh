@@ -1,17 +1,23 @@
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, case, distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import current_user
+from app.models.candidate import Candidate
 from app.models.client import Client
+from app.models.job import Job
+from app.models.pipeline import CandidateJob
 from app.models.user import User
-from app.schemas.clients import ClientCreate, ClientOut, ClientUpdate
+from app.schemas.clients import ClientCreate, ClientOut, ClientUpdate, ClientWithStats
 from app.services.audit import record as audit_record
 
 router = APIRouter(prefix="/clients", tags=["clients"])
+
+RECENT_DAYS = 7
 
 
 def _get_or_404(db: Session, client_id: int) -> Client:
@@ -21,18 +27,79 @@ def _get_or_404(db: Session, client_id: int) -> Client:
     return obj
 
 
-@router.get("", response_model=list[ClientOut])
+@router.get("", response_model=list[ClientWithStats])
 def list_clients(
     _user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     limit: int = 100,
     offset: int = 0,
 ):
-    return list(
-        db.scalars(
-            select(Client).order_by(Client.name).offset(offset).limit(limit)
-        ).all()
+    """Clients with per-client activity stats for the dashboard.
+
+    One grouped query joins clients → jobs → candidate_jobs → candidates so
+    we don't fan out N+1. Soft-deleted candidates are excluded from the
+    candidate counts; they're still visible at the per-job level if a
+    recruiter wants to dig in.
+    """
+    recent_threshold = datetime.now(UTC) - timedelta(days=RECENT_DAYS)
+
+    stmt = (
+        select(
+            Client.id,
+            Client.name,
+            Client.notes,
+            Client.created_at,
+            func.count(
+                distinct(case((Job.status == "open", Job.id), else_=None))
+            ).label("jobs_open"),
+            func.count(distinct(Job.id)).label("jobs_total"),
+            func.count(
+                distinct(
+                    case(
+                        (Candidate.deleted_at.is_(None), CandidateJob.candidate_id),
+                        else_=None,
+                    )
+                )
+            ).label("candidates_total"),
+            func.count(
+                distinct(
+                    case(
+                        (
+                            and_(
+                                Candidate.deleted_at.is_(None),
+                                CandidateJob.linked_at >= recent_threshold,
+                            ),
+                            CandidateJob.candidate_id,
+                        ),
+                        else_=None,
+                    )
+                )
+            ).label("candidates_recent"),
+        )
+        .select_from(Client)
+        .outerjoin(Job, Job.client_id == Client.id)
+        .outerjoin(CandidateJob, CandidateJob.job_id == Job.id)
+        .outerjoin(Candidate, Candidate.id == CandidateJob.candidate_id)
+        .group_by(Client.id, Client.name, Client.notes, Client.created_at)
+        .order_by(Client.name)
+        .offset(offset)
+        .limit(limit)
     )
+
+    rows = db.execute(stmt).all()
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "notes": r.notes,
+            "created_at": r.created_at,
+            "jobs_open": int(r.jobs_open or 0),
+            "jobs_total": int(r.jobs_total or 0),
+            "candidates_total": int(r.candidates_total or 0),
+            "candidates_recent": int(r.candidates_recent or 0),
+        }
+        for r in rows
+    ]
 
 
 @router.post("", response_model=ClientOut, status_code=status.HTTP_201_CREATED)

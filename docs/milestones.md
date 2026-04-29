@@ -226,3 +226,19 @@ Iterations after the original plan, driven by real-world use:
 **Admin bootstrap → CLI (ops):**
 - Removed `BOOTSTRAP_ADMIN_*` env-based first-boot admin (and the lifespan hook that consumed it). Plaintext credentials in `.env` are a prod hazard.
 - New CLI at `app/cli.py` with `admin create | set-password | list` subcommands; `make admin-create EMAIL=...`, `make admin-set-password EMAIL=...`, `make admin-list` wrappers. Interactive password prompt, echo-off, min 12 chars. Tests at `backend/tests/test_cli.py`.
+
+**Bulk reparse (extends M2):**
+- `POST /admin/reparse/resumes` — two-phase (count preview → confirm) to re-run `parse_resume` against every resume, refreshing `parsed_json` and (via the chained embed task) the vectors with the currently configured `LLM_PARSE_MODEL`. Sticky-edit invariant preserves manual recruiter edits. Used after switching parse models. UI button on `/admin/metrics`.
+
+**Candidate attribution (extends M1):**
+- New `candidates.created_by` column (migration `ee05f6c8d2a1`, FK → users, SET NULL). Populated by `POST /candidates` and bulk-import. `GET /candidates/{id}` hydrates `created_by_name` so the candidate detail page shows "Added by X" without a second fetch. Bulk-import now also writes a per-candidate `candidate.create` audit row (with `payload.via=bulk_import`) so the audit log answers "who added candidate #N" consistently regardless of intake path. Closes the asymmetry where stage moves had first-class attribution (`stage_transitions.by_user`) but candidate creation only lived in the audit log.
+
+**Clients dashboard stats (extends M1):**
+- `GET /clients` now returns `ClientWithStats` per row: `jobs_open`, `jobs_total`, `candidates_total` (distinct, soft-deleted excluded), `candidates_recent` (distinct candidates linked in the last 7 days). One grouped query joins clients → jobs → candidate_jobs → candidates so the dashboard renders without N+1 fan-out. Each card on `/clients` shows three columns: Jobs (open / total), Candidates, and Last 7d activity (highlighted when non-zero).
+
+**Candidate visibility (extends M1/M3):**
+- Candidates list rows now show email + phone alongside title/company/location and skills, so a recruiter scanning the pool can grab contact info without clicking through.
+- Kanban cards: replaced the skills chip block with email + phone + a "Moved Xd ago by Y" line. The board endpoint hydrates `last_transition` (most recent stage_transitions row, joined with users for the actor name) per-link so the kanban renders without N+1 fetches. Title attribute on the moved-line shows the absolute timestamp + actor.
+
+**Jobs dashboard stats (extends M1):**
+- `GET /jobs` now returns `JobWithStats` per row with the same shape philosophy: `candidates_total` (distinct currently linked, soft-deleted excluded), `candidates_recent` (linked in the last 7 days), `moves_recent` (stage transitions in the last 7 days — links/moves/unlinks all count). Implementation uses two grouped subqueries (candidate side + transition side) joined back to jobs to avoid the cartesian inflation a single multi-JOIN GROUP BY would produce. The client detail page renders jobs as a 3-col card grid (matching the clients dashboard) with a footer showing Candidates / New 7d / Moves 7d.

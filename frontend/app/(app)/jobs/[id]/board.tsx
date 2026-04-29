@@ -15,12 +15,35 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Card, CardEyebrow } from "@/components/ui/card";
-import { ApiError, api, type Candidate, type CandidateJob, type Stage } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type Candidate,
+  type CandidateJob,
+  type LastTransition,
+  type Stage,
+} from "@/lib/api";
 import { LinkCandidateButton } from "./link-candidate-button";
 import { LinkDrawer } from "./link-drawer";
 
-type LinkRow = CandidateJob & { candidate: Candidate };
+type LinkRow = CandidateJob & {
+  candidate: Candidate;
+  last_transition: LastTransition | null;
+};
 type Column = { stage: Stage; links: LinkRow[] };
+
+function relativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diffMs / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  if (d < 30) return `${Math.floor(d / 7)}w ago`;
+  return iso.slice(0, 10);
+}
 
 export function Board({
   jobId,
@@ -268,21 +291,30 @@ function CandidateCard({
           .filter(Boolean)
           .join(" · ") || <span>&nbsp;</span>}
       </div>
-      {c.skills.length ? (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {c.skills.slice(0, 4).map((s) => (
-            <span
-              key={s}
-              className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px]"
-            >
-              {s}
-            </span>
-          ))}
-          {c.skills.length > 4 ? (
-            <span className="text-[10px] text-[var(--muted-foreground)]">
-              +{c.skills.length - 4}
-            </span>
-          ) : null}
+      {c.email ? (
+        <div className="mt-1 truncate text-xs text-[var(--muted-foreground)]">
+          {c.email}
+        </div>
+      ) : null}
+      {c.phone ? (
+        <div className="mt-0.5 truncate text-xs text-[var(--muted-foreground)]">
+          {c.phone}
+        </div>
+      ) : null}
+      {link.last_transition ? (
+        <div
+          className="mt-2 truncate border-t border-[var(--border)] pt-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--muted-foreground)]"
+          title={`${new Date(link.last_transition.at).toLocaleString()}${
+            link.last_transition.by_user_name
+              ? ` · by ${link.last_transition.by_user_name}`
+              : ""
+          }`}
+          suppressHydrationWarning
+        >
+          Moved {relativeTime(link.last_transition.at)}
+          {link.last_transition.by_user_name
+            ? ` · ${link.last_transition.by_user_name}`
+            : ""}
         </div>
       ) : null}
     </Card>

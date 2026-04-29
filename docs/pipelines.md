@@ -74,6 +74,7 @@ Every state change goes through `app/services/pipeline.py`, which writes the aud
 
 - One column per `job_stages` row, in `position` order.
 - Cards drag between columns. **Optimistic update** moves the row in local state immediately, then rolls back if the API rejects.
+- Each card shows: candidate name, title · company · location, **email**, **phone**, and a "Moved Xd ago · by Y" footer driven by the `last_transition` field hydrated server-side by `/jobs/{id}/board`. Skills used to live on the card but were dropped — recruiters scanning the board care about contact info and recency, not the skills list (which is on the detail page).
 - A card's `details` button (visible on hover) opens a right-side drawer with that link's full transition history and link-scoped notes (`app/(app)/jobs/[id]/link-drawer.tsx`).
 - Linking a candidate uses a searchable picker (`link-candidate-button.tsx`) that filters the entire pool client-side. (M4's real search will replace this.)
 - Re-fetches happen via `router.refresh()` after each successful move/unlink so dependent server components (e.g. the dashboard) stay in sync.

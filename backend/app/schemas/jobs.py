@@ -27,6 +27,16 @@ class JobWithStages(JobOut):
     stages: list[StageOut]
 
 
+class JobWithStats(JobOut):
+    """Returned by GET /jobs (list). Activity stats per job for the
+    client-detail dashboard. Uses a 7-day window for the recent counts —
+    same as the clients dashboard, for consistency."""
+
+    candidates_total: int = 0
+    candidates_recent: int = 0
+    moves_recent: int = 0
+
+
 class _RangeMixin(BaseModel):
     @model_validator(mode="after")
     def _check_ranges(self):

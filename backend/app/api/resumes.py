@@ -173,7 +173,9 @@ async def bulk_import_candidates(
                 continue
 
             candidate = Candidate(
-                full_name=_placeholder_name_from_filename(filename), skills=[]
+                full_name=_placeholder_name_from_filename(filename),
+                skills=[],
+                created_by=user.id,
             )
             db.add(candidate)
             db.flush()
@@ -192,6 +194,20 @@ async def bulk_import_candidates(
             )
             db.add(resume)
             db.flush()
+            # Per-candidate audit row so attribution shows up in the audit log
+            # consistently — same shape as POST /candidates writes.
+            audit_record(
+                db,
+                actor_id=user.id,
+                action="candidate.create",
+                entity="candidate",
+                entity_id=candidate.id,
+                payload={
+                    "full_name": candidate.full_name,
+                    "via": "bulk_import",
+                    "filename": filename,
+                },
+            )
             db.commit()
             db.refresh(candidate)
             db.refresh(resume)

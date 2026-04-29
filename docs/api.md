@@ -58,7 +58,7 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 
 | Method | Path | Auth | Returns |
 |---|---|---|---|
-| `GET`    | `/clients` | cookie | `Client[]` |
+| `GET`    | `/clients` | cookie | `ClientWithStats[]` — each row carries `jobs_open`, `jobs_total`, `candidates_total` (distinct, soft-deleted excluded), `candidates_recent` (distinct candidates linked in the last 7 days). Powers the dashboard cards. Detail/create/update return plain `Client`. |
 | `POST`   | `/clients` | cookie | `201 Client` |
 | `GET`    | `/clients/{id}` | cookie | `Client` |
 | `PATCH`  | `/clients/{id}` | cookie | `Client` |
@@ -70,7 +70,7 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `GET`    | `/jobs?client_id=&status_filter=` | cookie | `Job[]` |
+| `GET`    | `/jobs?client_id=&status_filter=` | cookie | `JobWithStats[]` — each row carries `candidates_total` (distinct linked, soft-deleted excluded), `candidates_recent` (linked in last 7 days), `moves_recent` (stage transitions in last 7 days, includes initial-link rows). Powers the jobs grid on the client detail page. Detail/create return `JobWithStages` with the per-job stage list. |
 | `POST`   | `/jobs` | cookie | Returns `JobWithStages` (the deep-copied stages) |
 | `GET`    | `/jobs/{id}` | cookie | Returns `JobWithStages` |
 | `PATCH`  | `/jobs/{id}` | cookie | Partial update; status changes are just patches |
@@ -84,7 +84,7 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 |---|---|---|---|
 | `GET`    | `/candidates?include_deleted=` | cookie | Soft-deleted hidden by default |
 | `POST`   | `/candidates` | cookie | `201 Candidate` |
-| `GET`    | `/candidates/{id}` | cookie | `404` if soft-deleted |
+| `GET`    | `/candidates/{id}` | cookie | `404` if soft-deleted. Response hydrates `created_by_name` so the UI can show "Added by X" without a second fetch. List endpoint leaves it null. |
 | `PATCH`  | `/candidates/{id}` | cookie | `404` if soft-deleted |
 | `DELETE` | `/candidates/{id}` | cookie | Soft delete (sets `deleted_at`) |
 | `POST`   | `/candidates/{id}/restore` | cookie | Brings back a soft-deleted candidate |
@@ -126,7 +126,7 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| `GET`    | `/jobs/{id}/board` | cookie | Stages with their candidate-jobs (and embedded candidate). Soft-deleted candidates excluded. |
+| `GET`    | `/jobs/{id}/board` | cookie | Stages with their candidate-jobs (and embedded candidate). Soft-deleted candidates excluded. Each link carries `last_transition: {at, by_user_id, by_user_name, from_stage_id, to_stage_id}` — the most recent stage_transitions row for that link, hydrated server-side so the kanban can show "moved Xd ago by Y" without a per-card fetch. |
 | `POST`   | `/jobs/{id}/candidates` | cookie | `{candidate_id}` — link, auto-placed at stage 0. `409` if already linked. |
 | `PATCH`  | `/candidate-jobs/{id}` | cookie | `{stage_id}` — move; writes a `stage_transitions` row. Stage must belong to the same job. |
 | `DELETE` | `/candidate-jobs/{id}` | cookie | Unlink; writes a final `to_stage_id=NULL` audit row. The transitions persist. |
@@ -169,6 +169,7 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 |---|---|---|---|
 | `POST` | `/admin/reindex/candidates` | admin | Enqueues an embed task for every active candidate. Returns `{enqueued: <count>}` |
 | `POST` | `/admin/embeddings/reset?confirm=true` | admin | Drops & recreates `candidate_embeddings` with the configured `LLM_EMBED_DIM`, then enqueues a full reindex. Probes the configured embed model and rejects if dim mismatch. `skip_probe=true` to bypass the probe. See [search-and-ask.md](./search-and-ask.md#switching-to-a-real-embedding-model). |
+| `POST` | `/admin/reparse/resumes` | admin | Bulk-reparse every resume using the currently configured `LLM_PARSE_MODEL`. Without `?confirm=true` returns `{would_enqueue: N, warning}` so the UI can confirm. With `?confirm=true` resets each resume to `pending`, clears `parse_error`, enqueues a parse task per id; each task chains an embed on success. Sticky-edit invariant still holds — manually-edited candidate fields are preserved. Use after switching `LLM_PARSE_MODEL`. |
 
 ## M5 endpoints
 

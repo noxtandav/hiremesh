@@ -52,28 +52,75 @@ export default async function ClientDetailPage({
             </p>
           </Card>
         ) : (
-          <div className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)] bg-[var(--card)]">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {jobs.map((j) => (
-              <Link
-                key={j.id}
-                href={`/jobs/${j.id}`}
-                className="flex items-center justify-between gap-6 px-5 py-4 transition-colors hover:bg-[var(--muted)]"
-              >
-                <div className="min-w-0">
-                  <div className="font-medium tracking-tight">{j.title}</div>
-                  <div className="mt-1 text-xs text-[var(--muted-foreground)]">
-                    {[j.location, j.exp_min && `${j.exp_min}–${j.exp_max} yrs`]
-                      .filter(Boolean)
-                      .join(" · ")}
+              <Link key={j.id} href={`/jobs/${j.id}`}>
+                <Card className="flex h-full flex-col p-5 transition-colors hover:bg-[var(--muted)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <CardEyebrow>Job</CardEyebrow>
+                    <span
+                      className={`font-mono text-[10px] uppercase tracking-[0.18em] ${
+                        STATUS_TONE[j.status] ?? ""
+                      }`}
+                    >
+                      {j.status}
+                    </span>
                   </div>
-                </div>
-                <span
-                  className={`font-mono text-[10px] uppercase tracking-[0.18em] ${
-                    STATUS_TONE[j.status] ?? ""
-                  }`}
-                >
-                  {j.status}
-                </span>
+                  <div className="mt-2 text-base font-semibold tracking-tight">
+                    {j.title}
+                  </div>
+                  {(j.location || j.exp_min) ? (
+                    <p className="mt-1 line-clamp-2 text-xs text-[var(--muted-foreground)]">
+                      {[
+                        j.location,
+                        j.exp_min && `${j.exp_min}–${j.exp_max} yrs`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-auto grid grid-cols-3 gap-3 border-t border-[var(--border)] pt-4">
+                    <div>
+                      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                        Candidates
+                      </div>
+                      <div className="mt-1 text-sm font-semibold tabular-nums">
+                        {j.candidates_total}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                        New 7d
+                      </div>
+                      <div className="mt-1 text-sm tabular-nums">
+                        {j.candidates_recent > 0 ? (
+                          <span className="font-semibold text-emerald-600">
+                            +{j.candidates_recent}
+                          </span>
+                        ) : (
+                          <span className="text-[var(--muted-foreground)]">
+                            —
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
+                        Moves 7d
+                      </div>
+                      <div className="mt-1 text-sm tabular-nums">
+                        {j.moves_recent > 0 ? (
+                          <span className="font-semibold">{j.moves_recent}</span>
+                        ) : (
+                          <span className="text-[var(--muted-foreground)]">
+                            —
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
               </Link>
             ))}
           </div>

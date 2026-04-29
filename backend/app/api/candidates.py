@@ -44,7 +44,7 @@ def create_candidate(
     user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    obj = Candidate(**body.model_dump())
+    obj = Candidate(**body.model_dump(), created_by=user.id)
     db.add(obj)
     db.flush()
     audit_record(
@@ -62,7 +62,13 @@ def get_candidate(
     _user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    return _get_active_or_404(db, candidate_id)
+    obj = _get_active_or_404(db, candidate_id)
+    out = CandidateOut.model_validate(obj)
+    if obj.created_by is not None:
+        creator = db.get(User, obj.created_by)
+        if creator is not None:
+            out.created_by_name = creator.name
+    return out
 
 
 @router.patch("/{candidate_id}", response_model=CandidateOut)
