@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.deps import current_user
+from app.core.visibility import is_client_role, job_ids_visible_to
 from app.models.candidate import Candidate
 from app.models.job import Job, JobStage
 from app.models.pipeline import CandidateJob, StageTransition
@@ -41,15 +42,28 @@ def _link_or_404(db: Session, link_id: int) -> CandidateJob:
     return obj
 
 
+def _check_job_visible(db: Session, user: User, job_id: int) -> None:
+    """Refuse access to jobs not on the user's tagged client (client-role)."""
+    if is_client_role(user):
+        job = db.get(Job, job_id)
+        if job is None or job.client_id != user.client_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+
+
+def _check_link_visible(db: Session, user: User, link: CandidateJob) -> None:
+    _check_job_visible(db, user, link.job_id)
+
+
 # ----- on-job endpoints --------------------------------------------------
 
 
 @jobs_pipeline.get("/jobs/{job_id}/board", response_model=list[BoardColumn])
 def get_board(
     job_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
+    _check_job_visible(db, user, job_id)
     try:
         _job, stages, rows = board_for_job(db, job_id)
     except LookupError as e:
@@ -117,9 +131,25 @@ def add_candidate_to_job(
 ):
     if db.get(Job, job_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    _check_job_visible(db, user, job_id)
     candidate = db.get(Candidate, body.candidate_id)
     if candidate is None or candidate.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
+    # Client-role users can only link candidates already in their visibility
+    # set. Without this check, a client-role user could discover candidate
+    # ids belonging to other clients by trial-and-error linking attempts.
+    if is_client_role(user):
+        from app.core.visibility import candidate_ids_visible_to
+
+        visible = candidate_ids_visible_to(user)
+        if visible is not None and db.scalar(
+            select(Candidate.id).where(
+                Candidate.id == body.candidate_id, Candidate.id.in_(visible)
+            )
+        ) is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Candidate not found"
+            )
 
     existing = db.scalar(
         select(CandidateJob).where(
@@ -148,6 +178,7 @@ def move(
     db: Annotated[Session, Depends(get_db)],
 ):
     link = _link_or_404(db, link_id)
+    _check_link_visible(db, user, link)
     stage = db.get(JobStage, body.stage_id)
     if stage is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Stage not found")
@@ -164,16 +195,18 @@ def unlink_route(
     db: Annotated[Session, Depends(get_db)],
 ):
     link = _link_or_404(db, link_id)
+    _check_link_visible(db, user, link)
     unlink(db, link=link, by_user=user.id)
 
 
 @links.get("/{link_id}/transitions", response_model=list[StageTransitionOut])
 def list_transitions(
     link_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     link = _link_or_404(db, link_id)
+    _check_link_visible(db, user, link)
     return list(
         db.scalars(
             select(StageTransition)
@@ -193,9 +226,10 @@ def list_transitions(
 def get_link_by_candidate_and_job(
     candidate_id: int,
     job_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
+    _check_job_visible(db, user, job_id)
     link = db.scalar(
         select(CandidateJob).where(
             CandidateJob.candidate_id == candidate_id,

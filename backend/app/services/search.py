@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 
 from app.core.embeddings import embed
@@ -66,12 +66,17 @@ def _stage_subquery(req: SearchRequest):
 
 
 def filter_only(
-    db: Session, req: SearchRequest
+    db: Session,
+    req: SearchRequest,
+    *,
+    visible_ids: Select | None = None,
 ) -> list[tuple[Candidate, float | None]]:
     stmt = select(Candidate).where(*_filters(req))
     sub = _stage_subquery(req)
     if sub is not None:
         stmt = stmt.where(sub)
+    if visible_ids is not None:
+        stmt = stmt.where(Candidate.id.in_(visible_ids))
     stmt = stmt.order_by(Candidate.created_at.desc()).offset(req.offset).limit(req.limit)
     return [(c, None) for c in db.scalars(stmt).all()]
 
@@ -88,7 +93,10 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def semantic(
-    db: Session, req: SearchRequest
+    db: Session,
+    req: SearchRequest,
+    *,
+    visible_ids: Select | None = None,
 ) -> list[tuple[Candidate, float | None]]:
     """Filter the candidate set by hard filters, then rank by cosine distance.
 
@@ -106,6 +114,8 @@ def semantic(
     sub = _stage_subquery(req)
     if sub is not None:
         base = base.where(sub)
+    if visible_ids is not None:
+        base = base.where(Candidate.id.in_(visible_ids))
 
     dialect = db.bind.dialect.name if db.bind else "sqlite"
     if dialect == "postgresql":
@@ -132,13 +142,18 @@ def semantic(
     return [(c, score) for c, _emb, score in page]
 
 
-def search(db: Session, req: SearchRequest) -> list[tuple[Candidate, float | None]]:
+def search(
+    db: Session,
+    req: SearchRequest,
+    *,
+    visible_ids: Select | None = None,
+) -> list[tuple[Candidate, float | None]]:
     if req.q and req.q.strip():
-        return semantic(db, req)
-    return filter_only(db, req)
+        return semantic(db, req, visible_ids=visible_ids)
+    return filter_only(db, req, visible_ids=visible_ids)
 
 
-def count(db: Session, req: SearchRequest) -> int:
+def count(db: Session, req: SearchRequest, *, visible_ids: Select | None = None) -> int:
     """Total candidates that match these filters, ignoring limit/offset.
 
     When `q` is set we count candidates that have an embedding (the inner
@@ -161,4 +176,6 @@ def count(db: Session, req: SearchRequest) -> int:
     sub = _stage_subquery(req)
     if sub is not None:
         stmt = stmt.where(sub)
+    if visible_ids is not None:
+        stmt = stmt.where(Candidate.id.in_(visible_ids))
     return int(db.scalar(stmt) or 0)

@@ -6,7 +6,7 @@ from sqlalchemy import and_, case, distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.deps import current_user
+from app.core.deps import current_user, require_admin_or_recruiter
 from app.models.candidate import Candidate
 from app.models.client import Client
 from app.models.job import Job
@@ -27,9 +27,15 @@ def _get_or_404(db: Session, client_id: int) -> Client:
     return obj
 
 
+def _check_visible(user: User, client_id: int) -> None:
+    """Client-role users can only access their own tagged client."""
+    if user.role == "client" and user.client_id != client_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Client not found")
+
+
 @router.get("", response_model=list[ClientWithStats])
 def list_clients(
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     limit: int = 100,
     offset: int = 0,
@@ -85,6 +91,8 @@ def list_clients(
         .offset(offset)
         .limit(limit)
     )
+    if user.role == "client" and user.client_id is not None:
+        stmt = stmt.where(Client.id == user.client_id)
 
     rows = db.execute(stmt).all()
     return [
@@ -105,7 +113,7 @@ def list_clients(
 @router.post("", response_model=ClientOut, status_code=status.HTTP_201_CREATED)
 def create_client(
     body: ClientCreate,
-    user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     obj = Client(name=body.name, notes=body.notes)
@@ -123,9 +131,10 @@ def create_client(
 @router.get("/{client_id}", response_model=ClientOut)
 def get_client(
     client_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
+    _check_visible(user, client_id)
     return _get_or_404(db, client_id)
 
 
@@ -133,7 +142,7 @@ def get_client(
 def update_client(
     client_id: int,
     body: ClientUpdate,
-    _user: Annotated[User, Depends(current_user)],
+    _user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     obj = _get_or_404(db, client_id)
@@ -149,7 +158,7 @@ def update_client(
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_client(
     client_id: int,
-    user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     obj = _get_or_404(db, client_id)

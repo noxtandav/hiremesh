@@ -8,12 +8,16 @@ from sqlalchemy.orm import Session
 
 from app.core import storage
 from app.core.db import get_db
-from app.core.deps import current_user
+from app.core.deps import current_user, require_admin_or_recruiter
+from app.core.visibility import candidate_ids_visible_to
 from app.models.candidate import Candidate
+from app.models.job import Job
+from app.models.pipeline import CandidateJob
 from app.models.resume import Resume
 from app.models.user import User
 from app.schemas.resumes import BulkImportResponse, BulkImportResult, PresignedUrl, ResumeOut
 from app.services.audit import record as audit_record
+from app.services.pipeline import link_candidate_to_job
 
 router = APIRouter(tags=["resumes"])
 
@@ -43,11 +47,32 @@ def _candidate_or_404(db: Session, candidate_id: int) -> Candidate:
     return obj
 
 
+def _check_candidate_visible(db: Session, user: User, candidate_id: int) -> None:
+    """Refuse to expose a candidate (or anything attached) to a client-role
+    user that's not in their visibility set."""
+    visible = candidate_ids_visible_to(user)
+    if visible is None:
+        return
+    if (
+        db.scalar(
+            select(Candidate.id).where(
+                Candidate.id == candidate_id, Candidate.id.in_(visible)
+            )
+        )
+        is None
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Candidate not found")
+
+
 def _resume_or_404(db: Session, resume_id: int) -> Resume:
     obj = db.get(Resume, resume_id)
     if obj is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Resume not found")
     return obj
+
+
+def _check_resume_visible(db: Session, user: User, resume: Resume) -> None:
+    _check_candidate_visible(db, user, resume.candidate_id)
 
 
 def _enqueue_parse(resume_id: int) -> None:
@@ -65,10 +90,11 @@ def _enqueue_parse(resume_id: int) -> None:
 )
 async def upload_resume(
     candidate_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     file: UploadFile = File(...),
 ):
+    _check_candidate_visible(db, user, candidate_id)
     _candidate_or_404(db, candidate_id)
 
     if file.content_type not in ALLOWED_MIME:
@@ -103,6 +129,7 @@ async def upload_resume(
         mime=file.content_type,
         is_primary=not has_existing,
         parse_status="pending",
+        uploaded_by=user.id,
     )
     db.add(resume)
     db.commit()
@@ -122,6 +149,7 @@ async def bulk_import_candidates(
     user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     files: list[UploadFile] = File(...),
+    target_job_id: int | None = None,
 ) -> BulkImportResponse:
     """Create one candidate per uploaded resume and queue parsing.
 
@@ -129,6 +157,11 @@ async def bulk_import_candidates(
     filename; the parser fills in real fields when the worker runs. Per-file
     errors (bad mime, oversize, empty) appear in the response without failing
     the whole batch.
+
+    `target_job_id` is required for client-role users (their pool == their
+    linked candidates). When set, every successfully imported candidate is
+    automatically linked to that job. Admin/recruiter can omit it for
+    unlinked talent-base intake.
     """
     if not files:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No files provided")
@@ -137,6 +170,22 @@ async def bulk_import_candidates(
             status.HTTP_400_BAD_REQUEST,
             f"At most {BULK_MAX_FILES} files per batch (got {len(files)})",
         )
+
+    # target_job_id required + scoped for clients
+    if user.role == "client":
+        if target_job_id is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Client uploads must specify target_job_id (the job to link the new candidates to).",
+            )
+    if target_job_id is not None:
+        job = db.get(Job, target_job_id)
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Target job not found")
+        if user.role == "client" and job.client_id != user.client_id:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Target job not found"
+            )
 
     results: list[BulkImportResult] = []
     enqueue_ids: list[int] = []
@@ -191,9 +240,20 @@ async def bulk_import_candidates(
                 mime=file.content_type,
                 is_primary=True,
                 parse_status="pending",
+                uploaded_by=user.id,
             )
             db.add(resume)
             db.flush()
+
+            # Auto-link to the target job if one was specified.
+            if target_job_id is not None:
+                link_candidate_to_job(
+                    db,
+                    candidate_id=candidate.id,
+                    job_id=target_job_id,
+                    by_user=user.id,
+                )
+
             # Per-candidate audit row so attribution shows up in the audit log
             # consistently — same shape as POST /candidates writes.
             audit_record(
@@ -206,6 +266,7 @@ async def bulk_import_candidates(
                     "full_name": candidate.full_name,
                     "via": "bulk_import",
                     "filename": filename,
+                    "target_job_id": target_job_id,
                 },
             )
             db.commit()
@@ -256,9 +317,10 @@ async def bulk_import_candidates(
 )
 def list_resumes(
     candidate_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
+    _check_candidate_visible(db, user, candidate_id)
     _candidate_or_404(db, candidate_id)
     return list(
         db.scalars(
@@ -272,7 +334,7 @@ def list_resumes(
 @router.post("/resumes/{resume_id}/primary", response_model=ResumeOut)
 def set_primary(
     resume_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    _user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     resume = _resume_or_404(db, resume_id)
@@ -290,7 +352,7 @@ def set_primary(
 @router.get("/resumes/{resume_id}/file")
 def stream_resume_file(
     resume_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     download: bool = False,
 ):
@@ -301,6 +363,7 @@ def stream_resume_file(
     `S3_PUBLIC_ENDPOINT` to be reachable from the client.
     """
     resume = _resume_or_404(db, resume_id)
+    _check_resume_visible(db, user, resume)
     body = storage.get_object(resume.s3_key)
     safe_filename = (resume.filename or "resume").replace('"', "")[:200]
     disposition = "attachment" if download else "inline"
@@ -317,10 +380,11 @@ def stream_resume_file(
 @router.get("/resumes/{resume_id}/url", response_model=PresignedUrl)
 def get_download_url(
     resume_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     resume = _resume_or_404(db, resume_id)
+    _check_resume_visible(db, user, resume)
     expires_in = 300
     return PresignedUrl(
         url=storage.presigned_get_url(resume.s3_key, expires_in=expires_in),
@@ -331,10 +395,11 @@ def get_download_url(
 @router.post("/resumes/{resume_id}/reparse", response_model=ResumeOut)
 def reparse(
     resume_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     resume = _resume_or_404(db, resume_id)
+    _check_resume_visible(db, user, resume)
     resume.parse_status = "pending"
     resume.parse_error = None
     db.commit()
@@ -346,7 +411,7 @@ def reparse(
 @router.delete("/resumes/{resume_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_resume(
     resume_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    _user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     resume = _resume_or_404(db, resume_id)

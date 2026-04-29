@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardEyebrow } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -163,16 +163,37 @@ function CreateUserModal({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"admin" | "recruiter">("recruiter");
+  const [role, setRole] = useState<"admin" | "recruiter" | "client">("recruiter");
+  const [clientId, setClientId] = useState<number | "">("");
+  const [clients, setClients] = useState<{ id: number; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Lazy-load the client list the first time the user picks role=client.
+  useEffect(() => {
+    if (role === "client" && clients.length === 0) {
+      api.listClients().then(setClients).catch(() => {});
+    }
+  }, [role, clients.length]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (role === "client" && clientId === "") {
+      setError("Pick a client to tag this user to.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const u = await api.createUser({ email, name, password, role });
+      const u = await api.createUser({
+        email,
+        name,
+        password,
+        role,
+        ...(role === "client" && clientId !== ""
+          ? { client_id: Number(clientId) }
+          : {}),
+      });
       onCreated(u);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed");
@@ -228,14 +249,43 @@ function CreateUserModal({
           <select
             id="cu-role"
             value={role}
-            onChange={(e) => setRole(e.target.value as "admin" | "recruiter")}
+            onChange={(e) =>
+              setRole(e.target.value as "admin" | "recruiter" | "client")
+            }
             disabled={submitting}
             className="h-10 w-full rounded-md border border-[var(--input)] bg-transparent px-3 text-sm"
           >
             <option value="recruiter">recruiter</option>
             <option value="admin">admin</option>
+            <option value="client">client</option>
           </select>
         </div>
+        {role === "client" ? (
+          <div className="space-y-2">
+            <Label htmlFor="cu-client">Tagged client</Label>
+            <select
+              id="cu-client"
+              required
+              value={clientId}
+              onChange={(e) =>
+                setClientId(e.target.value === "" ? "" : Number(e.target.value))
+              }
+              disabled={submitting}
+              className="h-10 w-full rounded-md border border-[var(--input)] bg-transparent px-3 text-sm"
+            >
+              <option value="">Select a client…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              Client users see only this client&apos;s jobs and the candidates
+              linked to them.
+            </p>
+          </div>
+        ) : null}
         {error ? <p className="text-sm text-[var(--destructive)]">{error}</p> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>

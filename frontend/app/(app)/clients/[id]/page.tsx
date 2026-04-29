@@ -23,14 +23,18 @@ export default async function ClientDetailPage({
   const cookie = (await headers()).get("cookie") ?? undefined;
   const cid = Number(id);
 
-  let client;
+  let client, me;
   try {
-    client = await api.getClient(cid, cookie);
+    [client, me] = await Promise.all([
+      api.getClient(cid, cookie),
+      api.me(cookie),
+    ]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
     throw err;
   }
   const jobs = await api.listJobs({ client_id: cid }, cookie);
+  const canManage = me.role === "admin" || me.role === "recruiter";
 
   return (
     <div>
@@ -38,7 +42,7 @@ export default async function ClientDetailPage({
         eyebrow="Client"
         title={client.name}
         description={client.notes ?? undefined}
-        actions={<CreateJobButton clientId={cid} />}
+        actions={canManage ? <CreateJobButton clientId={cid} /> : null}
       />
 
       <section>

@@ -236,6 +236,14 @@ Iterations after the original plan, driven by real-world use:
 **Clients dashboard stats (extends M1):**
 - `GET /clients` now returns `ClientWithStats` per row: `jobs_open`, `jobs_total`, `candidates_total` (distinct, soft-deleted excluded), `candidates_recent` (distinct candidates linked in the last 7 days). One grouped query joins clients → jobs → candidate_jobs → candidates so the dashboard renders without N+1 fan-out. Each card on `/clients` shows three columns: Jobs (open / total), Candidates, and Last 7d activity (highlighted when non-zero).
 
+**Client role (extends M0/M1):**
+- New `client` role for client-side hiring users. Tagged to one `client_id` (new column on `users`, migration `ff06a4b2c3d5`). Sees only their tagged client, its jobs, candidates linked to those jobs, and notes they authored. Cannot create jobs, soft-delete candidates, change resume primary, delete resumes, or hit any `/admin/*` endpoint.
+- New `app/core/visibility.py` exposes `candidate_ids_visible_to` / `job_ids_visible_to` subqueries. Each list/read endpoint AND-s these onto its WHERE; explicit per-endpoint rather than SQLAlchemy event hooks so permission boundaries are obvious in code review.
+- Bulk-import requires `target_job_id` for client-role users; auto-links each created candidate to that job (their pool == their linked candidates). Resume model gains `uploaded_by` for attribution. Pool Q&A and search both thread the visibility filter through structured / semantic / hybrid routes.
+- If a tagged client is deleted, the user's `client_id` → NULL and `current_user` rejects with 401 (effectively locked out until an admin re-tags or deactivates them).
+- Admin user-creation form gets a client picker that appears when role='client'. CLI gets `--client-id` flag.
+- 22 new tests in `test_client_role.py` covering visibility (clients/jobs/candidates), mutation blocks (no create-job, no soft-delete, no direct candidate creation), bulk-import target_job_id requirement and auto-linking, `uploaded_by` populated in both single and bulk paths, search/ask scoping, admin-endpoint blocks, and the deleted-client lockout.
+
 **Candidate visibility (extends M1/M3):**
 - Candidates list rows now show email + phone alongside title/company/location and skills, so a recruiter scanning the pool can grab contact info without clicking through.
 - Kanban cards: replaced the skills chip block with email + phone + a "Moved Xd ago by Y" line. The board endpoint hydrates `last_transition` (most recent stage_transitions row, joined with users for the actor name) per-link so the kanban renders without N+1 fetches. Title attribute on the moved-line shows the absolute timestamp + actor.

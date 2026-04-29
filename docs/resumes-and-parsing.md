@@ -98,6 +98,10 @@ The candidate detail page renders the primary resume inline using a same-origin 
 
 Both the **New candidate** button and the **Bulk import** button on the candidates list page route through `POST /candidates/bulk-import`. New candidate is the single-file variant: drop one PDF/DOCX, get redirected to the new candidate's detail page; the parser fills name/skills/contact within seconds (the page polls every 1.5s while parsing). Bulk import takes many files at once and shows a per-file results list. Manual entry of a candidate without a resume is still available via the API (`POST /candidates`) but is not exposed in the UI today — every candidate created through the app starts from a resume.
 
+## Resume attribution
+
+`Resume.uploaded_by` (added with the client role, migration `ff06a4b2c3d5`) records who uploaded each resume. SET NULL on user delete so audit data survives. Populated by both single-upload and bulk-import paths. Useful for "who added this version?" provenance, especially when multiple recruiters or client-side users are uploading to the same candidate.
+
 ## Duplicate detection
 
 Bulk-import can't detect duplicates at upload time — parsing is async, so identity (email, phone) isn't known until the worker finishes. Detection happens **post-parse** via `GET /candidates/{id}/duplicates`, which returns active candidates that match the target's email (case-insensitive) or phone. The candidate detail page calls this and renders an amber banner if there are matches, so a recruiter sees the warning the next time they open the candidate. We don't auto-merge: the safer default is "surface and let a human decide".
@@ -116,6 +120,8 @@ Each parse task chains an `embed_candidate` task on success, so this also implic
 ## Bulk import
 
 `POST /candidates/bulk-import` is the multi-file variant of the upload flow. Each file becomes its own candidate with a placeholder name derived from the filename (`asha_rao.pdf` → `asha rao`). The parser overwrites that name when it runs — placeholders are never written to `candidate_field_overrides`, so the sticky-edit invariant is preserved (a parse result fills in the real `full_name` because there's no override).
+
+Optional `?target_job_id=N` auto-links each created candidate to that job. **Required for client-role users** since they have no concept of an unlinked talent base — every candidate they upload must belong to one of their jobs.
 
 Per-file errors (bad mime, oversize, empty) are reported in the response body without aborting the batch:
 

@@ -19,15 +19,27 @@ export default async function AppLayout({
     redirect("/login");
   }
 
-  const nav = [
-    { href: "/dashboard", label: "Dashboard" },
-    { href: "/clients", label: "Clients" },
-    { href: "/candidates", label: "Candidates" },
-    { href: "/ask", label: "Ask" },
-    ...(user.role === "admin"
-      ? [{ href: "/admin", label: "Admin" }]
-      : []),
-  ];
+  // Client-role users get a stripped-down nav: their tagged client + the
+  // pages that operate within it. They don't see the global Clients list,
+  // the Dashboard (which aggregates all clients), or admin.
+  const nav =
+    user.role === "client"
+      ? [
+          ...(user.client_id != null
+            ? [{ href: `/clients/${user.client_id}`, label: "My client" }]
+            : []),
+          { href: "/candidates", label: "Candidates" },
+          { href: "/ask", label: "Ask" },
+        ]
+      : [
+          { href: "/dashboard", label: "Dashboard" },
+          { href: "/clients", label: "Clients" },
+          { href: "/candidates", label: "Candidates" },
+          { href: "/ask", label: "Ask" },
+          ...(user.role === "admin"
+            ? [{ href: "/admin", label: "Admin" }]
+            : []),
+        ];
 
   return (
     <div className="flex min-h-screen flex-col">

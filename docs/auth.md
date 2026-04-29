@@ -1,6 +1,6 @@
 # Auth
 
-Self-hosted JWT in HTTP-only cookies. No public signup. Roles: `admin`, `recruiter`.
+Self-hosted JWT in HTTP-only cookies. No public signup. Roles: `admin`, `recruiter`, `client`.
 
 ## How a request gets authenticated
 
@@ -13,10 +13,23 @@ The cookie is the **only** auth surface. There are no Authorization headers, no 
 
 ## Roles
 
-- **`admin`** — can create users (`POST /users`) and (later) edit the system-wide stage template.
-- **`recruiter`** — everything else. The default role for new users.
+- **`admin`** — can create users (`POST /users`) and edit the system-wide stage template; only admin can run `/admin/*` (reindex, reset embeddings, reparse-all, audit log, metrics).
+- **`recruiter`** — full access to clients/jobs/candidates/notes/resumes across the whole talent base. The default role for new users.
+- **`client`** — scoped to one tagged `client_id` set when the user is created. Sees only:
+  - that one client (others 404)
+  - jobs of that client (others 404)
+  - candidates linked to those jobs via `candidate_jobs` (full talent base hidden)
+  - resumes attached to those candidates
+  - notes they themselves authored (recruiter-internal commentary stays internal)
 
-Endpoints that require admin use `Depends(require_admin)`, which is a thin gate on top of `current_user`. A recruiter calling an admin-only endpoint gets a `403`, not a `401`.
+  Cannot create jobs, soft-delete candidates, change a resume's primary, delete resumes, or hit any `/admin/*` endpoint. Bulk-import requires `target_job_id` (their job) so created candidates auto-link. Sticky-edit invariant still applies to manual edits they make.
+
+Three dependency gates layer on top of `current_user`:
+- `require_admin` — admin only.
+- `require_admin_or_recruiter` — blocks clients from operations that would either escape their scope or affect data shared across clients (job creation, candidate soft-delete, set-primary on a resume, etc.).
+- `current_user` — any logged-in role; visibility filters are applied per-endpoint via `app/core/visibility.py:candidate_ids_visible_to` / `job_ids_visible_to`.
+
+If a tagged client is deleted, the user's `client_id` goes `NULL` (FK `SET NULL`). `current_user` rejects `role='client' AND client_id IS NULL` with 401 — the user is effectively locked out until an admin re-tags or deactivates them.
 
 ## First admin (post-deploy CLI)
 

@@ -6,7 +6,13 @@ from app.models.user import User
 
 
 def create_user(
-    db: Session, *, email: str, name: str, password: str, role: str
+    db: Session,
+    *,
+    email: str,
+    name: str,
+    password: str,
+    role: str,
+    client_id: int | None = None,
 ) -> User:
     user = User(
         email=email.lower(),
@@ -15,6 +21,7 @@ def create_user(
         role=role,
         must_change_password=True,
         is_active=True,
+        client_id=client_id,
     )
     db.add(user)
     db.commit()

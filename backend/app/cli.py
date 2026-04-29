@@ -53,8 +53,14 @@ def _normalize_email(email: str) -> str:
 
 def cmd_create(args: argparse.Namespace) -> None:
     email = _normalize_email(args.email)
-    role: Literal["admin", "recruiter"] = args.role
+    role: Literal["admin", "recruiter", "client"] = args.role
+    client_id = getattr(args, "client_id", None)
     pw = _read_password(args.password)
+
+    if role == "client" and client_id is None:
+        sys.exit("--client-id is required when --role=client.")
+    if role != "client" and client_id is not None:
+        sys.exit("--client-id is only valid when --role=client.")
 
     with db_module.SessionLocal() as db:
         existing = db.scalar(select(User).where(User.email == email))
@@ -63,6 +69,12 @@ def cmd_create(args: argparse.Namespace) -> None:
                 f"User {email} already exists. "
                 f"Use `set-password` to reset their password."
             )
+        if role == "client":
+            from app.models.client import Client
+
+            if db.get(Client, client_id) is None:
+                sys.exit(f"No client with id {client_id}.")
+
         user = User(
             email=email,
             name=args.name,
@@ -70,6 +82,7 @@ def cmd_create(args: argparse.Namespace) -> None:
             role=role,
             must_change_password=False,
             is_active=True,
+            client_id=client_id if role == "client" else None,
         )
         db.add(user)
         db.commit()
@@ -128,8 +141,14 @@ def main(argv: list[str] | None = None) -> None:
     p_create.add_argument(
         "--role",
         default="admin",
-        choices=["admin", "recruiter"],
+        choices=["admin", "recruiter", "client"],
         help="Defaults to admin.",
+    )
+    p_create.add_argument(
+        "--client-id",
+        type=int,
+        default=None,
+        help="Client id to tag the user to. Required when --role=client.",
     )
     p_create.add_argument(
         "--password",

@@ -6,7 +6,7 @@ from sqlalchemy import and_, case, distinct, func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.deps import current_user
+from app.core.deps import current_user, require_admin_or_recruiter
 from app.models.candidate import Candidate
 from app.models.client import Client
 from app.models.job import Job
@@ -35,9 +35,15 @@ def _get_or_404(db: Session, job_id: int) -> Job:
     return obj
 
 
+def _check_visible(user: User, job: Job) -> None:
+    """Client-role users can only access jobs of their tagged client."""
+    if user.role == "client" and job.client_id != user.client_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+
+
 @router.get("", response_model=list[JobWithStats])
 def list_jobs(
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
     client_id: int | None = None,
     status_filter: str | None = None,
@@ -103,6 +109,8 @@ def list_jobs(
         stmt = stmt.where(Job.client_id == client_id)
     if status_filter is not None:
         stmt = stmt.where(Job.status == status_filter)
+    if user.role == "client" and user.client_id is not None:
+        stmt = stmt.where(Job.client_id == user.client_id)
     stmt = stmt.offset(offset).limit(limit)
 
     rows = db.execute(stmt).all()
@@ -120,7 +128,7 @@ def list_jobs(
 @router.post("", response_model=JobWithStages, status_code=status.HTTP_201_CREATED)
 def create_job(
     body: JobCreate,
-    user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     if db.get(Client, body.client_id) is None:
@@ -141,10 +149,11 @@ def create_job(
 @router.get("/{job_id}", response_model=JobWithStages)
 def get_job(
     job_id: int,
-    _user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(current_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
     job = _get_or_404(db, job_id)
+    _check_visible(user, job)
     stages = list_stages_for_job(db, job_id)
     return JobWithStages(
         **JobOut.model_validate(job).model_dump(),
@@ -156,7 +165,7 @@ def get_job(
 def update_job(
     job_id: int,
     body: JobUpdate,
-    _user: Annotated[User, Depends(current_user)],
+    _user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     obj = _get_or_404(db, job_id)
@@ -170,7 +179,7 @@ def update_job(
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_job(
     job_id: int,
-    user: Annotated[User, Depends(current_user)],
+    user: Annotated[User, Depends(require_admin_or_recruiter)],
     db: Annotated[Session, Depends(get_db)],
 ):
     obj = _get_or_404(db, job_id)

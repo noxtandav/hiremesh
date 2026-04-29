@@ -31,17 +31,20 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
   "id": 1,
   "email": "user@example.com",
   "name": "Name",
-  "role": "admin" | "recruiter",
+  "role": "admin" | "recruiter" | "client",
   "must_change_password": true,
-  "is_active": true
+  "is_active": true,
+  "client_id": null
 }
 ```
+
+`client_id` is set when `role='client'`. Such users see only their tagged client's jobs and the candidates linked to them — see [auth.md](./auth.md#roles) for the full scoping rules.
 
 ### Users (admin only)
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| `POST` | `/users` | `{email, name, password, role}` | `201 UserOut` |
+| `POST` | `/users` | `{email, name, password, role, client_id?}` | `201 UserOut`. `client_id` is required when `role='client'` (the user is then scoped to that one client) and rejected for admin/recruiter. |
 
 ## M1 endpoints
 
@@ -106,7 +109,7 @@ This file is a stable, human-readable index that we keep updated as endpoints ar
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | `POST`   | `/candidates/{id}/resumes` | cookie | multipart `file` (PDF/DOCX, ≤10 MB). Enqueues parse. |
-| `POST`   | `/candidates/bulk-import` | cookie | multipart `files[]` (≤50 per batch). Creates one candidate per file with a filename-derived placeholder name; queues parse for each. Per-file errors land in `results[]` without failing the batch. See [resumes-and-parsing.md](./resumes-and-parsing.md#bulk-import). |
+| `POST`   | `/candidates/bulk-import` | cookie | multipart `files[]` (≤50 per batch). Creates one candidate per file with a filename-derived placeholder name; queues parse for each. Per-file errors land in `results[]` without failing the batch. Optional `?target_job_id=N` auto-links each created candidate to that job — **required for client-role users** (their pool == their linked candidates). See [resumes-and-parsing.md](./resumes-and-parsing.md#bulk-import). |
 | `GET`    | `/candidates/{id}/resumes` | cookie | List, primary first |
 | `POST`   | `/resumes/{id}/primary` | cookie | Make this resume the primary |
 | `POST`   | `/resumes/{id}/reparse` | cookie | Resets to `pending`, re-enqueues |

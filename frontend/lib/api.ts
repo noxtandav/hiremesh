@@ -17,9 +17,11 @@ export type User = {
   id: number;
   email: string;
   name: string;
-  role: "admin" | "recruiter";
+  role: "admin" | "recruiter" | "client";
   must_change_password: boolean;
   is_active: boolean;
+  /** Set when role='client'. */
+  client_id: number | null;
 };
 
 export type Client = {
@@ -351,7 +353,12 @@ export const api = {
   listUsers: (cookie?: string) => request<User[]>("/users", { cookie }),
   updateUser: (
     id: number,
-    data: Partial<{ name: string; role: "admin" | "recruiter"; is_active: boolean }>,
+    data: Partial<{
+      name: string;
+      role: "admin" | "recruiter" | "client";
+      is_active: boolean;
+      client_id: number | null;
+    }>,
   ) =>
     request<User>(`/users/${id}`, {
       method: "PATCH",
@@ -366,7 +373,9 @@ export const api = {
     email: string;
     name: string;
     password: string;
-    role: "admin" | "recruiter";
+    role: "admin" | "recruiter" | "client";
+    /** Required when role='client'. */
+    client_id?: number;
   }) =>
     request<User>("/users", {
       method: "POST",
@@ -435,10 +444,17 @@ export const api = {
   // resumes
   listResumes: (candidateId: number, cookie?: string) =>
     request<Resume[]>(`/candidates/${candidateId}/resumes`, { cookie }),
-  bulkImportCandidates: async (files: File[]) => {
+  bulkImportCandidates: async (
+    files: File[],
+    opts: { targetJobId?: number } = {},
+  ) => {
     const fd = new FormData();
     for (const f of files) fd.append("files", f);
-    const res = await fetch(`${API_BASE}/candidates/bulk-import`, {
+    const url =
+      opts.targetJobId != null
+        ? `${API_BASE}/candidates/bulk-import?target_job_id=${opts.targetJobId}`
+        : `${API_BASE}/candidates/bulk-import`;
+    const res = await fetch(url, {
       method: "POST",
       body: fd,
       credentials: "include",

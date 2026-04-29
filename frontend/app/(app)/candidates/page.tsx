@@ -22,10 +22,16 @@ export default async function CandidatesPage() {
         title="Candidates"
         description="Search the pool in plain English. Filters layer on top."
         actions={
-          <div className="flex gap-2">
-            <BulkImportButton />
-            <CreateCandidateButton />
-          </div>
+          // Client-role users add candidates from their job's kanban
+          // (which uses bulk-import with a target_job_id under the hood).
+          // The unscoped buttons here would create unlinked candidates,
+          // which the API rejects for clients anyway.
+          me.role === "client" ? null : (
+            <div className="flex gap-2">
+              <BulkImportButton />
+              <CreateCandidateButton />
+            </div>
+          )
         }
       />
       <CandidateSearch

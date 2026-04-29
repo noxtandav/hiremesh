@@ -9,7 +9,11 @@ export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
   const cookie = (await headers()).get("cookie") ?? undefined;
-  const clients = await api.listClients(cookie);
+  const [clients, me] = await Promise.all([
+    api.listClients(cookie),
+    api.me(cookie),
+  ]);
+  const canManage = me.role === "admin" || me.role === "recruiter";
 
   return (
     <div>
@@ -17,7 +21,7 @@ export default async function ClientsPage() {
         eyebrow="Talent base"
         title="Clients"
         description="Companies you recruit for. Add a client first, then create jobs under it."
-        actions={<CreateClientButton />}
+        actions={canManage ? <CreateClientButton /> : null}
       />
 
       {clients.length === 0 ? (

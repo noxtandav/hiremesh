@@ -20,18 +20,20 @@ export default async function CandidateDetailPage({
   const cookie = (await headers()).get("cookie") ?? undefined;
   const cid = Number(id);
 
-  let candidate, notes, resumes, duplicates;
+  let candidate, notes, resumes, duplicates, me;
   try {
-    [candidate, notes, resumes, duplicates] = await Promise.all([
+    [candidate, notes, resumes, duplicates, me] = await Promise.all([
       api.getCandidate(cid, cookie),
       api.listNotes(cid, cookie),
       api.listResumes(cid, cookie),
       api.listCandidateDuplicates(cid, cookie),
+      api.me(cookie),
     ]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) notFound();
     throw err;
   }
+  const canManage = me.role === "admin" || me.role === "recruiter";
 
   const detail = (label: string, value: React.ReactNode) => (
     <div className="min-w-0">
@@ -54,7 +56,7 @@ export default async function CandidateDetailPage({
             .filter(Boolean)
             .join(" at ") || undefined
         }
-        actions={<DeleteCandidateButton id={cid} />}
+        actions={canManage ? <DeleteCandidateButton id={cid} /> : null}
       />
 
       {duplicates.length > 0 ? (

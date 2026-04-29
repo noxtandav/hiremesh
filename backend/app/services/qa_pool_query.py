@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import text
+from sqlalchemy import Select, text
 from sqlalchemy.orm import Session
 
 # All columns exposed by v_candidate_search. Lockstep with the migration.
@@ -158,10 +158,43 @@ def query_to_sql(q: StructuredQuery) -> tuple[str, dict[str, Any]]:
     return sql, params
 
 
-def execute(db: Session, q: StructuredQuery) -> list[dict[str, Any]]:
+def execute(
+    db: Session,
+    q: StructuredQuery,
+    *,
+    visible_ids: Select | None = None,
+) -> list[dict[str, Any]]:
     """Run the structured query against v_candidate_search and return rows
-    as plain dicts. Postgres-only — the view doesn't exist on SQLite."""
+    as plain dicts. Postgres-only — the view doesn't exist on SQLite.
+
+    `visible_ids` (a Select returning candidate ids) further restricts the
+    result to that set. Used to scope client-role users to their own pool.
+    """
     sql, params = query_to_sql(q)
-    result = db.execute(text(sql), params)
+
+    if visible_ids is not None:
+        # Materialize the visibility subquery to a list of ids and AND it
+        # onto the WHERE. Going through Python rather than embedding the
+        # subquery directly keeps SQL injection out of reach: `expanding`
+        # bindparams handle the IN list safely and the inputs are already
+        # ints from the DB.
+        from sqlalchemy import bindparam
+
+        ids = [row[0] for row in db.execute(visible_ids).all()]
+        if not ids:
+            return []
+        connector = " AND " if " WHERE " in sql else " WHERE "
+        # Splice the filter in *before* GROUP BY / ORDER BY / LIMIT clauses.
+        for tail in (" GROUP BY ", " ORDER BY ", " LIMIT "):
+            if tail in sql:
+                head, sep, rest = sql.partition(tail)
+                sql = f"{head}{connector}candidate_id IN :visible_ids{sep}{rest}"
+                break
+        else:
+            sql = f"{sql}{connector}candidate_id IN :visible_ids"
+        stmt = text(sql).bindparams(bindparam("visible_ids", expanding=True))
+        result = db.execute(stmt, {**params, "visible_ids": ids})
+    else:
+        result = db.execute(text(sql), params)
     rows = result.mappings().all()
     return [dict(r) for r in rows]

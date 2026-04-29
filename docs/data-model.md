@@ -72,6 +72,7 @@ notes                                      └── position
 | `cc03e9a4b2f7` | m6 audit_log | `audit_log` table — operational write-side event log |
 | `dd04e5b9a3c2` | resume extracted text | `resumes.extracted_text` — raw extracted body, used as Q&A context |
 | `ee05f6c8d2a1` | candidate created_by | `candidates.created_by` (FK → users, SET NULL) — first-class attribution for who added each candidate |
+| `ff06a4b2c3d5` | user client_id + resume uploaded_by | `users.client_id` (FK → clients, SET NULL) for the new `client` role; `resumes.uploaded_by` (FK → users, SET NULL) for upload attribution |
 
 ## M2 additions
 

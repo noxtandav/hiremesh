@@ -18,7 +18,7 @@ import json
 import re
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.core import llm
@@ -236,16 +236,20 @@ def _semantic_pick(
     *,
     base_filters: StructuredQuery | None,
     limit: int = SEMANTIC_LIMIT,
+    visible_ids: Select | None = None,
 ) -> tuple[list[tuple[Candidate, float | None]], int]:
     """Returns (hits, pool_size). `hits` is (candidate, score) ordered
     best-first. `pool_size` is the total number of candidates the semantic
     ranker considered (i.e. those matching base_filters AND with embeddings),
-    used downstream to compute a true percentile rank."""
+    used downstream to compute a true percentile rank.
+
+    `visible_ids` (when set) further constrains the pool to those candidate
+    ids — used to scope client-role users to their own pool."""
     req = _build_search_request(
         question, base_filters=base_filters, limit=limit
     )
-    hits = search_service.search(db, req)
-    pool_size = search_service.count(db, req)
+    hits = search_service.search(db, req, visible_ids=visible_ids)
+    pool_size = search_service.count(db, req, visible_ids=visible_ids)
     return hits, pool_size
 
 
@@ -301,12 +305,17 @@ def _synthesize_semantic(
 # ----- public api --------------------------------------------------------
 
 
-def answer_pool(db: Session, question: str) -> dict:
+def answer_pool(
+    db: Session,
+    question: str,
+    *,
+    visible_ids: Select | None = None,
+) -> dict:
     route = classify(question)
 
     if route == "structured":
         q = gen_query(question)
-        rows = exec_query(db, q)
+        rows = exec_query(db, q, visible_ids=visible_ids)
         return {
             "route": route,
             "answer": _synthesize_structured(question, rows),
@@ -316,7 +325,9 @@ def answer_pool(db: Session, question: str) -> dict:
         }
 
     if route == "semantic":
-        hits, pool_size = _semantic_pick(db, question, base_filters=None)
+        hits, pool_size = _semantic_pick(
+            db, question, base_filters=None, visible_ids=visible_ids
+        )
         return {
             "route": route,
             "answer": _synthesize_semantic(question, hits),
@@ -336,7 +347,9 @@ def answer_pool(db: Session, question: str) -> dict:
 
     # hybrid
     q = gen_query(question)
-    hits, pool_size = _semantic_pick(db, question, base_filters=q)
+    hits, pool_size = _semantic_pick(
+        db, question, base_filters=q, visible_ids=visible_ids
+    )
     return {
         "route": route,
         "answer": _synthesize_semantic(question, hits),
