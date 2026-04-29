@@ -19,6 +19,10 @@ class UserOut(BaseModel):
     is_active: bool
     # Set when role='client'; null otherwise.
     client_id: int | None = None
+    # Hydrated by GET /users / POST /users / PATCH /users so the admin UI can
+    # render the tag without a second round-trip. Null when role!='client'
+    # (or when the tagged client was deleted — the user is locked out anyway).
+    client_name: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -94,7 +94,7 @@ export function UsersClient({
               className="flex flex-wrap items-center gap-4 px-5 py-4"
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium tracking-tight">{u.name}</span>
                   {isMe ? (
                     <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
@@ -111,6 +111,19 @@ export function UsersClient({
                       pw·change
                     </span>
                   ) : null}
+                  {u.role === "client" ? (
+                    <span
+                      className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-amber-700"
+                      title="Scoped to a single client — sees only their jobs and linked candidates"
+                    >
+                      client →{" "}
+                      {u.client_name ?? (
+                        <span className="text-[var(--destructive)]">
+                          (untagged)
+                        </span>
+                      )}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="mt-0.5 text-xs text-[var(--muted-foreground)]">
                   {u.email}
@@ -119,10 +132,22 @@ export function UsersClient({
 
               <select
                 value={u.role}
-                onChange={(e) => setRole(u, e.target.value as "admin" | "recruiter")}
+                onChange={(e) =>
+                  setRole(u, e.target.value as "admin" | "recruiter")
+                }
                 disabled={busy}
+                title={
+                  u.role === "client"
+                    ? "Switching away from 'client' clears the tagged client. To assign a different client, deactivate this user and create a new one."
+                    : undefined
+                }
                 className="h-8 rounded-md border border-[var(--input)] bg-transparent px-2 text-xs"
               >
+                {/* Show 'client' as a current value only — not selectable to,
+                   since switching to client requires picking a client_id. */}
+                {u.role === "client" ? (
+                  <option value="client">client</option>
+                ) : null}
                 <option value="recruiter">recruiter</option>
                 <option value="admin">admin</option>
               </select>

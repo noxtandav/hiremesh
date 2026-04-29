@@ -43,12 +43,41 @@ def _validate_role_and_client(db: Session, role: str, client_id: int | None) -> 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+def _hydrate_one(db: Session, user: User) -> UserOut:
+    """Build a UserOut and fill client_name when the user is tagged."""
+    out = UserOut.model_validate(user)
+    if user.client_id is not None:
+        client = db.get(Client, user.client_id)
+        if client is not None:
+            out.client_name = client.name
+    return out
+
+
+def _hydrate_many(db: Session, users: list[User]) -> list[UserOut]:
+    """One IN(...) query for all referenced clients, then attach names."""
+    client_ids = {u.client_id for u in users if u.client_id is not None}
+    name_by_id: dict[int, str] = {}
+    if client_ids:
+        rows = db.execute(
+            select(Client.id, Client.name).where(Client.id.in_(client_ids))
+        ).all()
+        name_by_id = {row[0]: row[1] for row in rows}
+    out: list[UserOut] = []
+    for u in users:
+        item = UserOut.model_validate(u)
+        if u.client_id is not None:
+            item.client_name = name_by_id.get(u.client_id)
+        out.append(item)
+    return out
+
+
 @router.get("", response_model=list[UserOut])
 def list_users(
     _admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    return list(db.scalars(select(User).order_by(User.created_at.desc())).all())
+    users = list(db.scalars(select(User).order_by(User.created_at.desc())).all())
+    return _hydrate_many(db, users)
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -77,7 +106,7 @@ def create(
         payload={"email": user.email, "role": user.role, "client_id": user.client_id},
     )
     db.commit()
-    return user
+    return _hydrate_one(db, user)
 
 
 @router.patch("/{user_id}", response_model=UserOut)
@@ -156,7 +185,7 @@ def update_user(
 
     db.commit()
     db.refresh(target)
-    return target
+    return _hydrate_one(db, target)
 
 
 @router.post(
@@ -183,4 +212,4 @@ def reset_password(
     )
     db.commit()
     db.refresh(target)
-    return target
+    return _hydrate_one(db, target)

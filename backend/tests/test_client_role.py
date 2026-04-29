@@ -167,6 +167,47 @@ def test_create_admin_with_client_id_rejected(client):
     assert r.status_code == 400
 
 
+def test_user_list_hydrates_client_name(client):
+    _login(client, **ADMIN)
+    cid = client.post("/clients", json={"name": "Acme"}).json()["id"]
+    client.post(
+        "/users",
+        json={
+            "email": "tagged@example.com",
+            "name": "Tagged",
+            "password": "long-pass-123",
+            "role": "client",
+            "client_id": cid,
+        },
+    )
+
+    rows = client.get("/users").json()
+    tagged = next(u for u in rows if u["email"] == "tagged@example.com")
+    assert tagged["client_id"] == cid
+    assert tagged["client_name"] == "Acme"
+
+    # Admin user has no tag — both should be null.
+    me = next(u for u in rows if u["email"] == "admin@example.com")
+    assert me["client_id"] is None
+    assert me["client_name"] is None
+
+
+def test_create_user_response_includes_client_name(client):
+    _login(client, **ADMIN)
+    cid = client.post("/clients", json={"name": "Globex"}).json()["id"]
+    r = client.post(
+        "/users",
+        json={
+            "email": "new@example.com",
+            "name": "New",
+            "password": "long-pass-123",
+            "role": "client",
+            "client_id": cid,
+        },
+    )
+    assert r.json()["client_name"] == "Globex"
+
+
 def test_create_client_role_with_unknown_client_404(client):
     _login(client, **ADMIN)
     r = client.post(

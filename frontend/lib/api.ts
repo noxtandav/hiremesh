@@ -22,6 +22,8 @@ export type User = {
   is_active: boolean;
   /** Set when role='client'. */
   client_id: number | null;
+  /** Hydrated by the API; the client name corresponding to client_id. */
+  client_name: string | null;
 };
 
 export type Client = {
