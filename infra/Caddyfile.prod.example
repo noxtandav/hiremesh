@@ -1,0 +1,159 @@
+# =============================================================================
+# Hiremesh — Production Caddyfile (REFERENCE / EXAMPLE)
+# =============================================================================
+#
+# This file is NOT used by docker-compose. The active config is `Caddyfile`,
+# which runs plain HTTP on :80 for local dev.
+#
+# Use this file as a template when you deploy to a VPS and want Caddy to
+# obtain & auto-renew Let's Encrypt certificates for your domain.
+#
+# -----------------------------------------------------------------------------
+# How to use it
+# -----------------------------------------------------------------------------
+# 1. Point DNS at your VPS
+#       A     hiremesh.example.com  ->  <VPS public IPv4>
+#       AAAA  hiremesh.example.com  ->  <VPS public IPv6>   (optional)
+#    Wait for propagation before starting Caddy, otherwise the ACME HTTP-01
+#    challenge will fail and you may hit Let's Encrypt rate limits.
+#
+# 2. Open ports 80 and 443 on the VPS firewall (ufw, security groups, etc.)
+#    Port 80 is required even if you only serve traffic on 443 — Caddy uses
+#    it for the ACME HTTP-01 challenge and for HTTP->HTTPS redirects.
+#
+# 3. Copy this file over the active one (or bind-mount it instead):
+#       cp infra/Caddyfile.prod.example infra/Caddyfile
+#    Then edit the two placeholders below:
+#       - your@email.tld          (Let's Encrypt account / expiry notices)
+#       - hiremesh.example.com    (your real domain)
+#
+# 4. Update `infra/docker-compose.yml` so Caddy publishes 443 as well:
+#
+#       caddy:
+#         image: caddy:2-alpine
+#         ports:
+#           - "80:80"
+#           - "443:443"     # <-- add this
+#         volumes:
+#           - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#           - caddy_data:/data       # MUST persist — holds account key + certs
+#           - caddy_config:/config
+#
+#    The `caddy_data` named volume is critical: it stores the ACME account key
+#    and issued certificates. Losing it forces re-issuance on every restart
+#    and will hit Let's Encrypt rate limits (5 duplicate certs / week).
+#
+# 5. Set `COOKIE_SECURE=true` in `infra/.env` so the backend marks the auth
+#    cookie Secure (required once you're on HTTPS).
+#
+# 6. Bring it up:
+#       docker compose -f infra/docker-compose.yml up -d
+#    Watch the Caddy logs on first boot — you should see lines about
+#    "obtain certificate" and "certificate obtained successfully".
+#       docker compose -f infra/docker-compose.yml logs -f caddy
+#
+# -----------------------------------------------------------------------------
+# How issuance works (so you know what to expect)
+# -----------------------------------------------------------------------------
+# - On first start Caddy generates an ACME account key, registers with
+#   Let's Encrypt, and requests a cert for each hostname in this file.
+# - The default challenge is HTTP-01: Let's Encrypt hits
+#       http://<your-domain>/.well-known/acme-challenge/<token>
+#   which is why port 80 must be reachable from the public internet.
+# - Renewal is automatic, ~30 days before expiry. No cron, no certbot.
+# - If you sit behind Cloudflare, either disable the orange cloud (DNS-only)
+#   for first issuance, or switch to the DNS-01 challenge — see the
+#   "Cloudflare / DNS challenge" section near the bottom of this file.
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Global options
+# -----------------------------------------------------------------------------
+{
+	# Contact address for Let's Encrypt. They use it for expiry warnings and
+	# critical notices. Required for production; otherwise issuance still
+	# works but you get no heads-up if something breaks.
+	email your@email.tld
+
+	# Uncomment to test against the Let's Encrypt staging CA first. Staging
+	# certs are NOT trusted by browsers, but they have much higher rate
+	# limits — useful for shaking out DNS / firewall problems without
+	# burning your weekly quota of real certs.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+
+# -----------------------------------------------------------------------------
+# Main site
+# -----------------------------------------------------------------------------
+# Using a hostname (not `:80`) is what tells Caddy to enable automatic HTTPS:
+#   - request a cert from Let's Encrypt
+#   - listen on :443 with TLS
+#   - redirect :80 -> :443
+#
+hiremesh.example.com {
+	# Optional but recommended: HSTS. Tells browsers to only ever use HTTPS
+	# for this domain. Don't enable `preload` until you're sure all
+	# subdomains are HTTPS-ready — preload submission is hard to reverse.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+	}
+
+	# API: strip the /api prefix so FastAPI sees clean paths (matches the
+	# behavior of the dev Caddyfile).
+	handle_path /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Everything else -> Next.js
+	handle {
+		reverse_proxy web:3000
+	}
+
+	# Optional: write access logs to stdout so `docker compose logs caddy`
+	# shows them. Remove if you find them too noisy.
+	log {
+		output stdout
+		format console
+	}
+}
+
+
+# -----------------------------------------------------------------------------
+# Optional: redirect the apex to the www host (or vice versa)
+# -----------------------------------------------------------------------------
+# www.hiremesh.example.com {
+# 	redir https://hiremesh.example.com{uri} permanent
+# }
+
+
+# -----------------------------------------------------------------------------
+# Optional: Cloudflare / DNS-01 challenge
+# -----------------------------------------------------------------------------
+# If your domain is proxied through Cloudflare (orange cloud) HTTP-01 won't
+# work because Cloudflare terminates :80 itself. Two options:
+#
+#   (a) Set the DNS record to "DNS only" (grey cloud) so traffic reaches
+#       your VPS directly. Simplest.
+#
+#   (b) Use the DNS-01 challenge with a Cloudflare API token. This requires
+#       a Caddy build that includes the `caddy-dns/cloudflare` plugin —
+#       the stock `caddy:2-alpine` image does NOT have it. Build a custom
+#       image with `xcaddy`, or use one of the community images that bundle
+#       common DNS providers. Then the per-site block looks like:
+#
+#         hiremesh.example.com {
+#             tls {
+#                 dns cloudflare {env.CF_API_TOKEN}
+#             }
+#             ...
+#         }
+#
+#       and pass `CF_API_TOKEN` into the caddy service via docker-compose.
+#
+# Other DNS providers (Route53, DigitalOcean, etc.) work the same way —
+# see https://github.com/caddy-dns for the list of plugins.
